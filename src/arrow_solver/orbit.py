@@ -41,13 +41,15 @@ def detect(image):
         return None
     center,radius,rect = found[0]
     ignored = [rect]
-    # Sandglass green caps lie on the same rail. Ignore only compact rail objects.
-    green = cv2.inRange(hsv,(35,100,150),(90,255,255))
-    _,_,stats,centers = cv2.connectedComponentsWithStats(green)
-    for s,p in zip(stats[1:],centers[1:]):
-        if s[4]>radius*radius*.08 and max(s[2:4])<radius*3 and on_edge(p):
-            r = radius*1.2
-            ignored.append((round(p[0]-r),round(p[1]-r),round(r*2),round(r*2)))
+    # Ignore compact objects straddling the rail, without classifying their skin.
+    # Keep this spatial test narrow: nearby arrows inside the board must survive.
+    from .vision import foreground_mask
+    _,_,stats,_ = cv2.connectedComponentsWithStats(foreground_mask(image))
+    for bx,by,bw,bh,area in stats[1:]:
+        vertical = (bx-tolerance<=left<=bx+bw+tolerance or bx-tolerance<=right<=bx+bw+tolerance) and by<=bottom and by+bh>=top
+        horizontal = (by-tolerance<=top<=by+bh+tolerance or by-tolerance<=bottom<=by+bh+tolerance) and bx<=right and bx+bw>=left
+        if area>radius*radius*.08 and max(bw,bh)<radius*3 and (vertical or horizontal):
+            ignored.append((int(bx)-2,int(by)-2,int(bw)+4,int(bh)+4))
     return OrbitObstacle(tuple(map(float,(left,top,right-left,bottom-top))),
                          tuple(map(float,center)),radius,ignored)
 

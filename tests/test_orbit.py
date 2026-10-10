@@ -137,3 +137,34 @@ def test_332_all_111_taps_keep_nominal_exit_window_clear_without_captures(tmp_pa
                 now=lambda:clock.t,captured_at=0)
     assert ex.run()==111
     assert seen==plan.order
+
+
+@pytest.mark.parametrize('scale',[.75,1.,1.25])
+def test_333_heart_on_rail_is_ignored_but_all_arrows_remain(scale):
+    image=read_image(FIXTURES/'level333.png')
+    image=cv2.resize(image,None,fx=scale,fy=scale)
+    board=recognize(image).board
+    assert board.orbit_obstacle and not board.issues
+    assert len(board.arrows)==109
+    assert len(solve(board).order)==109
+    ScreenValidator(image,board)
+    # The right rail's heart is excluded even where it protrudes into the crop.
+    x,y,w,h=board.orbit_obstacle.track_rect
+    assert any(bx<=x+w<=bx+bw and by<=950*scale<=by+bh
+               for bx,by,bw,bh in board.orbit_obstacle.ignored_regions)
+
+
+@pytest.mark.parametrize('color',[(180,180,180),(230,110,100),(170,70,210)])
+def test_unknown_rail_items_are_ignored_without_color_specific_detection(color):
+    from arrow_solver.vision import foreground_mask
+    image=read_image(FIXTURES/'level333.png')
+    original=detect(image)
+    x,y,w,h=original.track_rect
+    center=(round(x+w*.5),round(y))
+    cv2.circle(image,center,20,color,-1)
+    obstacle=detect(image)
+    assert obstacle and obstacle.center==original.center
+    mask=mask_objects(foreground_mask(image),(0,0,image.shape[1],image.shape[0]),obstacle)
+    assert mask[center[1]+10,center[0]]==0
+    # A valid arrow near the top remains foreground.
+    assert mask[556,175]>0
