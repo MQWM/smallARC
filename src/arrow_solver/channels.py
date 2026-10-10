@@ -7,6 +7,31 @@ from .models import TurnChannel,DIRECTIONS,Plan
 from . import geometry
 
 
+def _channel_path(ports, rect, badge_size):
+    """Build L/U centerlines from two ports, independent of skin rotation."""
+    rank = {'top':0,'right':1,'bottom':2,'left':3}
+    ports = sorted(ports,key=lambda p:(rank[p[0]],p[1][0],p[1][1]))
+    (side,entry),(out_side,exit) = ports
+    x,y,w,h = rect
+    if side==out_side:
+        inset = badge_size*.25
+        if side in ('top','bottom'):
+            bend = y+h-inset if side=='top' else y+inset
+            path = [entry,(entry[0],bend),(exit[0],bend),exit]
+        else:
+            bend = x+w-inset if side=='left' else x+inset
+            path = [entry,(bend,entry[1]),(bend,exit[1]),exit]
+    elif (rank[side]-rank[out_side])%2:
+        corner = (entry[0],exit[1]) if side in ('top','bottom') else (exit[0],entry[1])
+        path = [entry,corner,exit]
+    else:
+        # Opposite-side ports are not one of the confirmed L/U styles.
+        return None
+    inward = {'top':'DOWN','right':'LEFT','bottom':'UP','left':'RIGHT'}
+    outward = {'top':'UP','right':'RIGHT','bottom':'DOWN','left':'LEFT'}
+    return entry,exit,inward[side],outward[out_side],path
+
+
 def find_channels(image,crop):
     from .special import counter_digit_templates,normalize_digit
     x,y,w,h = crop
@@ -44,23 +69,18 @@ def find_channels(image,crop):
                     continue
                 point = (x+bx+float(center[0]),y+by) if side=='top' else (x+bx+float(center[0]),y+by+bh-1) if side=='bottom' else (x+bx,y+by+float(center[1])) if side=='left' else (x+bx+bw-1,y+by+float(center[1]))
                 ports.append((side,point))
-        if len(ports)!=2 or not any(side=='top' for side,_ in ports):
+        if len(ports)!=2:
             # Retain the unexplained component so recognition refuses execution.
             continue
-        ports.sort(key=lambda p:(p[0]!='top',p[1][0]))
-        side,entry = ports[0]
-        out_side,exit = ports[1]
-        if out_side in ('left','right'):
-            route = [entry,(entry[0],exit[1]),exit]
-        elif out_side=='top':
-            bottom = y+by+bh-min(qw,qh)*.25
-            route = [entry,(entry[0],bottom),(exit[0],bottom),exit]
-        else:
+        visual_rect = (int(x+bx),int(y+by),int(bw),int(bh))
+        result = _channel_path(ports,visual_rect,min(qw,qh))
+        if result is None:
             continue
+        entry,exit,entry_direction,exit_direction,route = result
         entry,exit = tuple(map(float,entry)),tuple(map(float,exit))
         route = [tuple(map(float,p)) for p in route]
-        found.append(TurnChannel(len(found)+1,value,entry,exit,'DOWN',
-                     {'left':'LEFT','right':'RIGHT','top':'UP'}[out_side],route,(int(x+bx),int(y+by),int(bw),int(bh))))
+        found.append(TurnChannel(len(found)+1,value,entry,exit,entry_direction,
+                                 exit_direction,route,visual_rect))
     return found
 
 

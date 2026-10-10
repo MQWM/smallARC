@@ -1,11 +1,13 @@
 from pathlib import Path
 import cv2
+import numpy as np
 import pytest
 from arrow_solver.models import Arrow,Board,TurnChannel,Plan,Portal
 from arrow_solver.vision import read_image,recognize
 from arrow_solver.solver import solve,verify_plan,BoardError
 from arrow_solver.executor import ScreenValidator,Executor,Cancelled
-from arrow_solver.channels import route
+from arrow_solver.channels import route,find_channels
+from arrow_solver.models import DIRECTIONS
 from test_next_level import ClockControl
 
 
@@ -146,3 +148,64 @@ def test_sparse_316_recognizes_and_plans_four_arrows(scale,tmp_path):
     assert ex.run()==4
     assert len(taps)==4
     assert all(taps[i+1][1]-taps[i][1]>=2. for i in range(3))
+
+
+@pytest.fixture(scope='module')
+def level377():
+    image = read_image(Path(__file__).parent/'fixtures/recorded/level377.png')
+    return image,recognize(image).board
+
+
+def test_377_detects_left_u_and_completes_plan(level377,tmp_path):
+    image,board = level377
+    assert not board.issues and len(board.arrows)==150
+    assert [c.remaining for c in board.turn_channels]==[1,2]
+    channel = board.turn_channels[1]
+    assert channel.entry_direction=='RIGHT' and channel.exit_direction=='LEFT'
+    plan = solve(board)
+    assert len(plan.order)==150
+    assert sum(2 in uses for uses in plan.channel_uses.values())==2
+    verify_plan(board,plan)
+    ScreenValidator(image,board)
+    clock = ClockControl()
+    taps = []
+    class Device:
+        serial='test-only'
+        def tap(self,*point):taps.append(point)
+        def screenshot(self):pytest.fail('no screenshots during channel execution')
+    ex = Executor(Device(),board,plan,image,tmp_path,clock,delay=0,now=lambda:clock.t)
+    assert ex.run()==150 and len(taps)==150
+
+
+@pytest.mark.parametrize('channel_index',[0,1])
+@pytest.mark.parametrize('rotation',range(4))
+@pytest.mark.parametrize('scale',[.75,1.,1.25])
+def test_l_u_detector_supports_rotations_and_two_way_routes(level377,channel_index,rotation,scale):
+    image,original = level377
+    channel = original.turn_channels[channel_index]
+    x,y,w,h = channel.visual_rect
+    patch = image[y:y+h,x:x+w].copy()
+    hsv = cv2.cvtColor(patch,cv2.COLOR_BGR2HSV)
+    white = cv2.inRange(hsv,(0,0,220),(180,45,255))
+    yy,xx = np.nonzero(white)
+    badge = patch[yy.min():yy.max()+1,xx.min():xx.max()+1].copy()
+    patch = np.rot90(patch,rotation).copy()
+    # The game rotates the lane, while the number stays upright.
+    yy,xx = np.nonzero(np.rot90(white,rotation))
+    patch[yy.min():yy.max()+1,xx.min():xx.max()+1] = cv2.resize(badge,(int(xx.max()-xx.min()+1),int(yy.max()-yy.min()+1)))
+    canvas = cv2.copyMakeBorder(patch,20,20,20,20,cv2.BORDER_CONSTANT,value=(91,65,60))
+    canvas = cv2.resize(canvas,None,fx=scale,fy=scale)
+    found = find_channels(canvas,(0,0,canvas.shape[1],canvas.shape[0]))
+    assert len(found)==1 and found[0].remaining==channel.remaining
+    c = found[0]
+    board = Board(300,300,(0,0,300,300),(0,0),(10,10),30,30,[],line_width=4*scale,turn_channels=[c])
+    for port,direction,outgoing in [(c.entry,c.entry_direction,DIRECTIONS[c.exit_direction]),
+                                   (c.exit,{'UP':'DOWN','DOWN':'UP','LEFT':'RIGHT','RIGHT':'LEFT'}[c.exit_direction],tuple(-v for v in DIRECTIONS[c.entry_direction]))]:
+        vector = np.array(DIRECTIONS[direction])
+        head = np.array(port)-vector*15
+        arrow = Arrow(1,[(0,0)],direction,tuple(head),pixel_path=[tuple(head-vector*10),tuple(head)])
+        segments,uses,blocked = route(board,arrow,{c.id:c.remaining})
+        assert not blocked and uses==[c.id]
+        actual = np.array(segments[-1][1])-segments[-1][0]
+        assert tuple(np.sign(actual))==outgoing
+        assert route(board,arrow,{c.id:0})[1:]==([],False)
