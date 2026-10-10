@@ -42,6 +42,68 @@ def timer_mask(image, visual_rect, head_rect):
     return result
 
 
+def arrow_components(image, foreground, line_width=None):
+    """Separate confirmed broad skins from differently colored touching arrows."""
+    count,labels,stats,centers = timer_separated_components(image,foreground,line_width)
+    if line_width is None:
+        distance = cv2.distanceTransform(foreground,cv2.DIST_L2,5)
+        medial = (distance>=cv2.dilate(distance,np.ones((3,3),np.uint8))) & (distance>1)
+        line_width = 2*float(np.median(distance[medial])) if medial.any() else 2.
+    hsv = cv2.cvtColor(image,cv2.COLOR_BGR2HSV)
+    warm = (hsv[:,:,0]<40)&(hsv[:,:,1]>100)&(hsv[:,:,2]>130)
+    minimum = max(12,image.shape[0]*image.shape[1]*.000015)
+    for label in range(1,count):
+        x,y,w,h,area = stats[label]
+        if min(w,h)<line_width*2.5 or area<line_width**2*8:
+            continue
+        patch = labels[y:y+h,x:x+w]
+        original = patch==label
+        skin = original & warm[y:y+h,x:x+w]
+        shape = find_wide_shape(np.pad(skin.astype(np.uint8)*255,3),line_width)
+        if shape is None:
+            continue
+        filled = shape[3][3:-3,3:-3]>0
+        yy,xx = np.nonzero(filled)
+        envelope = np.zeros_like(filled)
+        envelope[yy.min():yy.max()+1,xx.min():xx.max()+1] = True
+        # Faces may protrude through small gaps in the colored shaft contour.
+        # Neutral decoration inside its bounds is part of the skin, not a head.
+        claimed = filled | (envelope & (hsv[y:y+h,x:x+w,1]<60))
+        outside = original & ~claimed
+        # A colored neighbor must have a visible, independently recognizable head.
+        n,parts,part_stats,_ = cv2.connectedComponentsWithStats(outside.astype(np.uint8))
+        neighbors = []
+        from .vision import find_head,RecognitionError
+        for part in range(1,n):
+            px,py,pw,ph,pa = part_stats[part]
+            if pa<minimum:
+                continue
+            mask = np.pad((parts[py:py+ph,px:px+pw]==part).astype(np.uint8)*255,3)
+            try:
+                find_head(mask,line_width)
+            except RecognitionError:
+                continue
+            neighbors.append(part)
+        if not neighbors:
+            continue
+        # Claim internal decoration for the skin, including separate eye fragments.
+        patch[claimed & (foreground[y:y+h,x:x+w]>0)] = label
+        for part in neighbors:
+            patch[parts==part] = count
+            count+=1
+    if count!=len(stats):
+        # Rebuild bounding boxes for split components and the broad skin.
+        new_stats = np.zeros((count,5),np.int32)
+        new_centers = np.zeros((count,2),float)
+        for label in range(count):
+            yy,xx = np.nonzero(labels==label)
+            if len(xx):
+                new_stats[label] = (xx.min(),yy.min(),np.ptp(xx)+1,np.ptp(yy)+1,len(xx))
+                new_centers[label] = (xx.mean(),yy.mean())
+        stats,centers = new_stats,new_centers
+    return count,labels,stats,centers
+
+
 def timer_separated_components(image, foreground, line_width=None):
     """Give colored neighbors of a confirmed missile their own foreground labels.
 

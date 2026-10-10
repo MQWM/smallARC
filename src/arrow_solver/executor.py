@@ -12,7 +12,7 @@ import numpy as np
 from .models import Board, Plan
 from .solver import verify_plan, block_threshold
 from .vision import foreground_mask
-from .special import timer_mask, timer_separated_components
+from .special import timer_mask, arrow_components
 
 
 class ExecutionError(RuntimeError):
@@ -49,7 +49,7 @@ class ScreenValidator:
         from .orbit import mask_objects
         fg = mask_objects(foreground_mask(roi),board.crop_rect,board.orbit_obstacle)
         self.background = np.median(roi[fg == 0], axis=0) if np.any(fg == 0) else np.median(roi.reshape(-1, 3), axis=0)
-        _, labels, _, _ = timer_separated_components(roi, fg, board.line_width)
+        _, labels, _, _ = arrow_components(roi, fg, board.line_width)
         counts = np.bincount(labels.ravel())
         self.masks = {}
         assigned = set()

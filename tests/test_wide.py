@@ -89,3 +89,63 @@ def test_burning_prefix_is_visual_only_and_does_not_free_cells(wide):
     hx,hy,hw,hh=timer.head_rect
     frame[hy:hy+hh,hx:hx+hw]=verifier.background
     assert not verifier.matches(frame,set(),burning=True)
+
+
+@pytest.mark.parametrize('scale',[.75,1.,1.25])
+def test_342_touching_broad_skin_preserves_independent_small_arrow(scale,tmp_path):
+    from arrow_solver.executor import ScreenValidator
+    image=read_image(Path(__file__).parent/'fixtures/recorded/level342.png')
+    image=cv2.resize(image,None,fx=scale,fy=scale)
+    board=recognize(image).board
+    if scale==.75:
+        # Pair recovery succeeds; another thin arrow loses its tail at this
+        # resolution, so the complete board must remain non-executable.
+        assert len(board.arrows)==120
+        assert len(board.issues)==1 and '路径未覆盖完整箭身' in board.issues[0]
+    else:
+        assert not board.issues
+        assert len(board.arrows)==121
+    broad=next(a for a in board.arrows if a.kind=='wide')
+    small=min((a for a in board.arrows if a.kind=='normal' and a.direction=='LEFT'),
+              key=lambda a:np.linalg.norm(np.array(a.pixel_path[-1])-np.array((346,1130))*scale))
+    assert np.linalg.norm(np.array(small.pixel_path[-1])-np.array((346,1130))*scale)<board.line_width
+    assert len(small.cells)>=8
+    assert small.cells[0] not in broad.footprint
+    # Maximum-width lanes remain, except the unsupported tail cap cell.
+    assert len({x for x,y in broad.footprint})==3
+    assert len(broad.footprint)==3*len(broad.cells)-1
+    if scale==.75:
+        return
+    plan=solve(board)
+    assert len(plan.order)==121
+    assert broad.id not in plan.blockers[small.id]
+    assert plan.blockers[broad.id]  # Actual forward blockers were not erased.
+    validator=ScreenValidator(image,board)
+    assert not np.any(validator.masks[broad.id]&validator.masks[small.id])
+    path=export_run(tmp_path,image,board,plan)
+    assert Board.load(path/'board.json').fingerprint()==board.fingerprint()
+
+
+@pytest.mark.parametrize('missing',['wide','small'])
+def test_342_omitting_either_touching_arrow_is_rejected(missing):
+    from arrow_solver.executor import ScreenValidator,ExecutionError
+    image=read_image(Path(__file__).parent/'fixtures/recorded/level342.png')
+    board=recognize(image).board
+    target=next(a for a in board.arrows if a.kind=='wide') if missing=='wide' else min(
+        (a for a in board.arrows if a.kind=='normal' and a.direction=='LEFT'),
+        key=lambda a:np.linalg.norm(np.array(a.pixel_path[-1])-np.array((346,1130))))
+    board.arrows.remove(target)
+    with pytest.raises(ExecutionError,match='未解释'):
+        ScreenValidator(image,board)
+
+
+def test_342_small_arrow_click_cannot_be_moved_onto_broad_skin():
+    from arrow_solver.executor import ScreenValidator,ExecutionError
+    image=read_image(Path(__file__).parent/'fixtures/recorded/level342.png')
+    board=recognize(image).board
+    broad=next(a for a in board.arrows if a.kind=='wide')
+    small=min((a for a in board.arrows if a.kind=='normal' and a.direction=='LEFT'),
+              key=lambda a:np.linalg.norm(np.array(a.pixel_path[-1])-np.array((346,1130))))
+    small.click_point=broad.click_point
+    with pytest.raises(ExecutionError,match='独立前景'):
+        ScreenValidator(image,board)

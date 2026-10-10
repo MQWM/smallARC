@@ -343,7 +343,7 @@ def fit_grid(paths: list[np.ndarray], line_width: float):
 def recognize(image: np.ndarray, crop=None) -> Recognition:
     from .orbit import detect,mask_objects
     from .channels import find_channels
-    from .special import find_timer_shape, read_countdown, find_wide_shape, find_portals, find_counter_blocks, flame_arrow_mask, timer_separated_components
+    from .special import find_timer_shape, read_countdown, find_wide_shape, find_portals, find_counter_blocks, flame_arrow_mask, arrow_components
     h, w = image.shape[:2]
     crop = tuple(crop or suggest_crop(image))
     x, y, cw, ch = map(int, crop)
@@ -355,7 +355,7 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
     channels = find_channels(image,crop)
     orbit = detect(image)
     foreground = mask_objects(foreground_mask(roi),crop,orbit)
-    n, labels, stats, _ = timer_separated_components(roi, foreground)
+    n, labels, stats, _ = arrow_components(roi, foreground)
     candidates = []
     widths = []
     for label in range(1, n):
@@ -541,6 +541,26 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
                                      for along in range(lo,hi+1)
                                      for cross in range(center-radius,center+radius+1))
         board.arrows.append(arrow)
+    # The conservative maximum-width footprint can extend past a decorated
+    # tail cap. A visible neighboring arrow in those empty pixels remains an
+    # independent instance; trim only unsupported cells on the tail row.
+    from .geometry import point_distance
+    for broad in board.arrows:
+        if broad.kind!='wide':
+            continue
+        (_,_,_,filled),offset = wide_shapes[broad.id]
+        axis = 0 if broad.direction in ('LEFT','RIGHT') else 1
+        tail_row = broad.cells[0][axis]
+        other_cells = {c for other in board.arrows if other.id!=broad.id and other.kind=='normal'
+                       for c in other.cells if any(point_distance(board.pixel(c),a,b)<=line_width*.5
+                                                   for a,b in zip(other.pixel_path,other.pixel_path[1:]))}
+        trimmed = []
+        for cell in broad.footprint:
+            px,py = np.rint(np.array(board.pixel(cell))-offset).astype(int)
+            supported = 0<=py<filled.shape[0] and 0<=px<filled.shape[1] and filled[py,px]>0
+            if cell[axis]!=tail_row or cell not in other_cells or supported:
+                trimmed.append(cell)
+        broad.footprint = trimmed
     from .models import Portal, CounterBlock
     board.portals = [Portal(board.cell(center), center, rect) for center,rect in portals]
     board.counter_blocks = [CounterBlock(board.cell(center), value, rect) for center,rect,value in counter_blocks]
