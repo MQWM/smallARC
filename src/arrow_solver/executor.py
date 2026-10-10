@@ -46,7 +46,8 @@ class ScreenValidator:
         x, y, w, h = board.crop_rect
         self.roi = (slice(y, y + h), slice(x, x + w))
         roi = source[self.roi]
-        fg = foreground_mask(roi)
+        from .orbit import mask_objects
+        fg = mask_objects(foreground_mask(roi),board.crop_rect,board.orbit_obstacle)
         self.background = np.median(roi[fg == 0], axis=0) if np.any(fg == 0) else np.median(roi.reshape(-1, 3), axis=0)
         _, labels, _, _ = timer_separated_components(roi, fg, board.line_width)
         counts = np.bincount(labels.ravel())
@@ -123,7 +124,9 @@ class Executor:
                  control: ExecutionControl, report=lambda kind, data: None,
                  delay: float = .35, *, timer_deadline: float | None = None,
                  timer_duration: float | None = None, flight_wait: float = 5.,
-                 not_before: float = 0., counter_settle: float = 2., now=time.monotonic):
+                 not_before: float = 0., counter_settle: float = 2., now=time.monotonic,
+                 captured_at: float | None = None, orbit_period: float = 37.,
+                 orbit_window: float = 3., orbit_clockwise: bool = True):
         verify_plan(board,plan)
         if board.issues:
             raise ExecutionError("存在未解决的识别问题，不能自动执行")
@@ -134,6 +137,19 @@ class Executor:
         self.control,self.report,self.delay = control,report,delay
         self.arrows = {a.id:a for a in board.arrows}
         self.timers = {a.id for a in board.arrows if a.kind=='timer'}
+        self.captured_at = captured_at
+        self.orbit_period,self.orbit_window,self.orbit_clockwise = orbit_period,orbit_window,orbit_clockwise
+        if board.orbit_obstacle:
+            if captured_at is None:
+                raise ExecutionError('移动机关缺少抓图时间，请重新获取截图')
+            if self.timers:
+                raise ExecutionError('小豆豆与自动发射子弹组合暂不支持，请手动处理')
+            from .orbit import wait_seconds
+            try:
+                wait_seconds(board.orbit_obstacle,[],now()-captured_at,orbit_period,orbit_window,
+                             orbit_clockwise,board.line_width)
+            except ValueError as exc:
+                raise ExecutionError(str(exc)) from exc
         self.timer_deadline,self.timer_duration = timer_deadline,timer_duration
         self.flight_wait,self.not_before,self.now = flight_wait,not_before,now
         self.counter_settle = max(0.,counter_settle)
@@ -190,6 +206,10 @@ class Executor:
         if not 0 <= start < len(self.plan.order):
             raise ExecutionError('执行游标无效')
         removed = set(self.plan.order[:start])
+        channel_counts = {c.id:c.remaining for c in self.board.turn_channels}
+        for old in removed:
+            for cid in self.plan.channel_uses.get(old,[]):
+                channel_counts[cid]-=1
         sent_clicks = sum(self.arrows[aid].kind!='timer' for aid in removed)
         # Resume has only the last dispatch timestamp. Use that as a conservative
         # upper bound for all prior count milestones; never repeat their taps.
@@ -199,6 +219,9 @@ class Executor:
         self.check_budget(removed)
         self.control.wait(max(0.,self.not_before-self.now()))
         self.log('ready',step=start,mode='batch_no_capture')
+        if self.board.orbit_obstacle:
+            self.log('orbit_settings',period=self.orbit_period,window=self.orbit_window,
+                     clockwise=self.orbit_clockwise,capture_age=self.now()-self.captured_at)
         for index in range(start,len(self.plan.order)):
             self.control.check()
             self.check_budget(removed)
@@ -218,6 +241,25 @@ class Executor:
                 self.control.wait(wait)
                 self.log('assumed_departed',step=index+1,arrow=aid,total=len(self.plan.order))
             else:
+                if self.board.orbit_obstacle:
+                    from .orbit import exit_phases,wait_seconds
+                    exits = exit_phases(self.board,self.arrows[aid],channel_counts)
+                    wait_started = self.now()
+                    while True:
+                        self.control.check()
+                        try:
+                            wait = wait_seconds(self.board.orbit_obstacle,exits,self.now()-self.captured_at,
+                                                self.orbit_period,self.orbit_window,self.orbit_clockwise,
+                                                self.board.line_width) if exits else 0.
+                        except ValueError as exc:
+                            raise ExecutionError(str(exc)) from exc
+                        if wait<=1e-6:
+                            break
+                        if self.now()-wait_started+wait>self.orbit_period:
+                            raise ExecutionError('一圈内未找到小豆豆安全出口窗口，请调整避让参数或重新抓图')
+                        self.log('waiting_orbit',step=index,arrow=aid,seconds=wait)
+                        self.control.wait(wait+ .01)
+                        self.check_budget(removed)
                 self.log('clicking',step=index,arrow=aid)
                 self.control.check()
                 self.log('attempted',step=index,arrow=aid)
@@ -240,5 +282,7 @@ class Executor:
                 self.log('dispatched',step=index+1,arrow=aid,total=len(self.plan.order),not_before=self.not_before)
                 self.control.wait(max(0.,self.not_before-self.now()))
             removed.add(aid)
+            for cid in self.plan.channel_uses.get(aid,[]):
+                channel_counts[cid]-=1
         self.log('sent_complete',step=len(self.plan.order),mode='batch_no_capture')
         return len(self.plan.order)

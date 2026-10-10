@@ -16,6 +16,12 @@ from .vision import write_image
 def overlay(image, board: Board, plan: Plan | None = None, preview: int = -1):
     canvas = image.copy()
     scale = max(1., image.shape[1] / 900)
+    if board.orbit_obstacle:
+        o = board.orbit_obstacle
+        x,y,w,h = map(round,o.track_rect)
+        cv2.rectangle(canvas,(x,y),(x+w,y+h),(0,180,255),max(1,round(scale)))
+        cv2.circle(canvas,tuple(map(round,o.center)),round(o.radius),(0,180,255),max(1,round(scale)))
+        cv2.putText(canvas,'ORBIT',(x,y-8),cv2.FONT_HERSHEY_SIMPLEX,.4*scale,(0,180,255),max(1,round(scale)),cv2.LINE_AA)
     for portal in board.portals:
         center = tuple(round(v) for v in portal.center)
         radius = round(max(portal.visual_rect[2:])*.5)
@@ -79,6 +85,7 @@ def export_run(root: Path, image, board: Board, plan: Plan | None):
                 "portals": [asdict(p) for p in board.portals],
                 "counter_blocks": [asdict(b) for b in board.counter_blocks],
                 "turn_channels": [asdict(c) for c in board.turn_channels],
+                "orbit_obstacle": asdict(board.orbit_obstacle) if board.orbit_obstacle else None,
                 "actions": [{"arrow": aid, "action": "wait_timer" if arrows[aid].kind == "timer" else "tap",
                              "point": None if arrows[aid].kind == "timer" else arrows[aid].click_point} for aid in plan.order],
                 "clicks": [{"arrow": aid, "point": arrows[aid].click_point} for aid in plan.order if arrows[aid].kind != "timer"]}

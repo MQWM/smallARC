@@ -245,3 +245,15 @@ def test_drag_control_point_and_undo_without_typing(window,app):
     window.save_arrow_edit()
     assert window.editing
     assert '至少' in window.edit_note.text()
+
+
+def test_orbit_settings_only_appear_for_moving_obstacle_board(window,app):
+    image=read_image(Path(__file__).parent/'fixtures/recorded/level332.png')
+    window.set_source(image,'fake',time.monotonic())
+    window.recognized(recognize(image))
+    assert not window.orbit_group.isHidden()
+    assert window.orbit_period.value()==37
+    assert window.orbit_window.value()==3
+    window.set_source(sample(),'fake')
+    window.recognized(recognize(sample()))
+    assert window.orbit_group.isHidden()

@@ -154,6 +154,23 @@ class MainWindow(QMainWindow):
         self.delay.setSingleStep(.1)
         delay_row.addWidget(self.delay)
         exec_layout.addLayout(delay_row)
+        self.orbit_group = QGroupBox("小豆豆避让 · 估计位置，中途不抓图")
+        orbit_form = QFormLayout(self.orbit_group)
+        self.orbit_period = QDoubleSpinBox()
+        self.orbit_period.setRange(5.,300.)
+        self.orbit_period.setValue(37.)
+        self.orbit_period.setSuffix(" 秒")
+        orbit_form.addRow("绕一圈时间",self.orbit_period)
+        self.orbit_direction = QComboBox()
+        self.orbit_direction.addItems(["顺时针","逆时针"])
+        orbit_form.addRow("移动方向",self.orbit_direction)
+        self.orbit_window = QDoubleSpinBox()
+        self.orbit_window.setRange(.5,15.)
+        self.orbit_window.setValue(3.)
+        self.orbit_window.setSuffix(" 秒")
+        self.orbit_window.setToolTip("覆盖点击到箭头头部抵达外围轨道的时间；若仍碰撞可调大。另有体积、延迟与预测误差余量。")
+        orbit_form.addRow("出口避让窗口",self.orbit_window)
+        exec_layout.addWidget(self.orbit_group)
         start_row = QHBoxLayout()
         exec_layout.addLayout(start_row)
         self.run_button = self._button("执行整关 / 继续", self.execute, start_row)
@@ -221,6 +238,8 @@ class MainWindow(QMainWindow):
             button.setEnabled(idle and self.board is not None)
         self.reviewed.setEnabled(idle and self.board is not None)
         self.delay.setEnabled(idle)
+        self.orbit_group.setVisible(self.board is not None and self.board.orbit_obstacle is not None)
+        self.orbit_group.setEnabled(idle)
         self.countdown.setEnabled(idle and self.cursor == 0 and self.timer_deadline is None)
         self.timer_running.setEnabled(idle and self.cursor == 0 and self.timer_deadline is None)
         self.flight_wait.setEnabled(idle)
@@ -370,6 +389,8 @@ class MainWindow(QMainWindow):
             self.message(f"数字障碍 {block.cell}：再成功消除 {block.remaining} 支箭头后消失，请核对读数")
         for channel in self.board.turn_channels:
             self.message(f"转弯通道 {channel.id}：两端可进入，再通过 {channel.remaining} 支后消失，请核对读数和开口")
+        if self.board.orbit_obstacle:
+            self.message("检测到小豆豆轨道；默认顺时针 37 秒/圈，按出口时间窗口简单避让，执行不核验是否退回。")
         for issue in self.board.issues:
             self.message(issue)
         self.recompute()
@@ -583,16 +604,21 @@ class MainWindow(QMainWindow):
         flight_wait, not_before = self.flight_wait.value(), self.next_action_at
         duration = self.countdown.value() if has_timer else None
         auto_next = self.auto_next.isChecked()
+        captured_at = self.captured_at
+        orbit_options = dict(orbit_period=self.orbit_period.value(),orbit_window=self.orbit_window.value(),
+                             orbit_clockwise=self.orbit_direction.currentIndex()==0)
 
         def run(report):
             run_dir = export_run(self.run_root, source, board, plan)
             report("run_directory", {"path":str(run_dir)})
             executor = Executor(device, board, plan, source, run_dir, control, report, delay,
-                                timer_deadline=deadline, timer_duration=duration, flight_wait=flight_wait, not_before=not_before)
+                                timer_deadline=deadline, timer_duration=duration, flight_wait=flight_wait, not_before=not_before,
+                                captured_at=captured_at,**orbit_options)
             cursor = executor.run(start)
             if auto_next:
                 return ContinuousPlay(device,control,self.run_root,report,delay=delay,
                                       flight_wait=flight_wait,
+                                      **orbit_options,
                                       next_report=lambda kind,data: executor.log(kind,**data)).run()
             return cursor
         self.work(run, self.execution_done, execution=True)
@@ -604,10 +630,12 @@ class MainWindow(QMainWindow):
         self.control = ExecutionControl()
         device,control = AndroidDevice(serial,self.adb),self.control
         auto_next,delay,flight_wait = self.auto_next.isChecked(),self.delay.value(),self.flight_wait.value()
+        orbit_options = dict(orbit_period=self.orbit_period.value(),orbit_window=self.orbit_window.value(),
+                             orbit_clockwise=self.orbit_direction.currentIndex()==0)
         def run(report):
             if auto_next:
                 return ContinuousPlay(device,control,self.run_root,report,delay=delay,
-                                      flight_wait=flight_wait).run()
+                                      flight_wait=flight_wait,**orbit_options).run()
             return NextLevel(device,control,report).run()
         self.work(run,self.execution_done,execution=True)
 
@@ -629,6 +657,7 @@ class MainWindow(QMainWindow):
             self.populate()
             self.redraw()
             self.update_timer_text()
+            self.orbit_group.setVisible(self.board.orbit_obstacle is not None)
             return
         if kind == "auto_level_plan":
             self.plan = data['plan']
@@ -657,6 +686,8 @@ class MainWindow(QMainWindow):
             self.progress_label.setText(f"等待 {data['threshold']} 次消除的离场与方块解锁，约 {data['seconds']:.1f} 秒；可停止")
         elif kind == "waiting_channel":
             self.progress_label.setText(f"等待箭头通过转弯通道 {data['channels']}，约 {data['seconds']:.1f} 秒；可停止")
+        elif kind == "waiting_orbit":
+            self.progress_label.setText(f"等待小豆豆通过箭头 #{data['arrow']} 的出口，约 {data['seconds']:.1f} 秒；可停止")
         elif kind == "next_level_waiting":
             self.progress_label.setText(data['message']+'；每 5 秒检查，可停止')
         elif kind == "next_level_clicked":

@@ -92,6 +92,11 @@ def repair_small_color_gaps(image, mask):
 def suggest_crop(image: np.ndarray) -> tuple[int, int, int, int]:
     """Suggest the dense central gameplay band; user can override on the image."""
     h, w = image.shape[:2]
+    from .orbit import detect
+    orbit = detect(image)
+    if orbit:
+        x,y,bw,bh = orbit.track_rect
+        return (round(x+4),round(y+4),round(bw-8),round(bh-8))
     mask = foreground_mask(image)
     count = (mask > 0).sum(axis=1)
     active = count > max(6, w * .015)
@@ -336,6 +341,7 @@ def fit_grid(paths: list[np.ndarray], line_width: float):
 
 
 def recognize(image: np.ndarray, crop=None) -> Recognition:
+    from .orbit import detect,mask_objects
     from .channels import find_channels
     from .special import find_timer_shape, read_countdown, find_wide_shape, find_portals, find_counter_blocks, flame_arrow_mask, timer_separated_components
     h, w = image.shape[:2]
@@ -347,7 +353,8 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
     portals = find_portals(image, crop)
     counter_blocks = find_counter_blocks(image,crop)
     channels = find_channels(image,crop)
-    foreground = foreground_mask(roi)
+    orbit = detect(image)
+    foreground = mask_objects(foreground_mask(roi),crop,orbit)
     n, labels, stats, _ = timer_separated_components(roi, foreground)
     candidates = []
     widths = []
@@ -538,6 +545,7 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
     board.portals = [Portal(board.cell(center), center, rect) for center,rect in portals]
     board.counter_blocks = [CounterBlock(board.cell(center), value, rect) for center,rect,value in counter_blocks]
     board.turn_channels = channels
+    board.orbit_obstacle = orbit
     for channel in channels:
         if channel.remaining is None:
             board.issues.append(f'转弯通道 {channel.id} 的剩余次数不确定')

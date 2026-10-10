@@ -58,6 +58,14 @@ class TurnChannel:
 
 
 @dataclass
+class OrbitObstacle:
+    track_rect: tuple[float,float,float,float]
+    center: tuple[float,float]
+    radius: float
+    ignored_regions: list[tuple[int,int,int,int]]
+
+
+@dataclass
 class Board:
     image_width: int
     image_height: int
@@ -77,6 +85,7 @@ class Board:
     portals: list[Portal] = field(default_factory=list)
     counter_blocks: list[CounterBlock] = field(default_factory=list)
     turn_channels: list[TurnChannel] = field(default_factory=list)
+    orbit_obstacle: OrbitObstacle | None = None
 
     def pixel(self, cell: Cell) -> tuple[float, float]:
         return tuple(self.grid_origin[i] + cell[i] * self.grid_step[i] for i in range(2))
@@ -109,6 +118,10 @@ class Board:
                                       'visual_rect':tuple(c['visual_rect'])}) for c in data.get('turn_channels',[])]
         for key in ("crop_rect", "grid_origin", "grid_step"):
             data[key] = tuple(data[key])
+        if data.get('orbit_obstacle'):
+            o = data['orbit_obstacle']
+            data['orbit_obstacle'] = OrbitObstacle(tuple(o['track_rect']),tuple(o['center']),o['radius'],
+                                                  [tuple(r) for r in o['ignored_regions']])
         return cls(**data)
 
 
