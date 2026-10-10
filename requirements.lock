@@ -1,0 +1,6 @@
+# Verified on macOS ARM64 / Python 3.11.16.
+numpy==2.4.6
+opencv-python-headless==5.0.0.93
+PySide6-Essentials==6.11.2
+shiboken6==6.11.2
+
