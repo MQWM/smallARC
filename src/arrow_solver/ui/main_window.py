@@ -23,6 +23,7 @@ from .board_view import BoardView
 from .workers import Task
 from .path_editor import edited_arrow, snapped_point
 from ..geometry import point_distance
+from ..orbit import capture_pair, predicted_position
 
 
 
@@ -37,6 +38,7 @@ class MainWindow(QMainWindow):
         self.source = self.board = self.plan = self.crop = None
         self.source_device = None
         self.captured_at = None
+        self.sampled_obstacle = None
         self.timer_deadline = None
         self.next_action_at = 0.
         self.cursor = 0
@@ -57,6 +59,9 @@ class MainWindow(QMainWindow):
         self.timer_tick = QTimer(self)
         self.timer_tick.timeout.connect(self.update_timer_text)
         self.timer_tick.start(1000)
+        self.orbit_tick = QTimer(self)
+        self.orbit_tick.timeout.connect(self.update_orbit_preview)
+        self.orbit_tick.start(100)
 
     def _button(self, text, callback, layout):
         button = QPushButton(text)
@@ -154,7 +159,7 @@ class MainWindow(QMainWindow):
         self.delay.setSingleStep(.1)
         delay_row.addWidget(self.delay)
         exec_layout.addLayout(delay_row)
-        self.orbit_group = QGroupBox("小豆豆避让 · 估计位置，中途不抓图")
+        self.orbit_group = QGroupBox("小豆豆避让 · 两帧测速，中途不抓图")
         orbit_form = QFormLayout(self.orbit_group)
         self.orbit_speed = QDoubleSpinBox()
         self.orbit_speed.setRange(1.,3000.)
@@ -171,6 +176,8 @@ class MainWindow(QMainWindow):
         self.orbit_window.setSuffix(" 秒")
         self.orbit_window.setToolTip("覆盖点击到箭头头部抵达外围轨道的时间；若仍碰撞可调大。另有体积、延迟与预测误差余量。")
         orbit_form.addRow("出口避让窗口",self.orbit_window)
+        self.orbit_speed.valueChanged.connect(self.update_orbit_preview)
+        self.orbit_direction.currentIndexChanged.connect(self.update_orbit_preview)
         exec_layout.addWidget(self.orbit_group)
         start_row = QHBoxLayout()
         exec_layout.addLayout(start_row)
@@ -312,16 +319,20 @@ class MainWindow(QMainWindow):
 
     def capture(self):
         serial, adb = self.selected_serial(), self.adb
-        def shot(_):
-            captured = time.monotonic()
-            return AndroidDevice(serial, adb).screenshot(), captured
-        self.work(shot, lambda result: self.set_source(result[0], serial, result[1]))
+        def shot(report):
+            return capture_pair(AndroidDevice(serial,adb),ExecutionControl(),report=report)
+        self.work(shot, lambda result: self.set_source(result.image,serial,result.captured_at,
+                                                      result.obstacle,result.warning))
 
-    def set_source(self, image, serial, captured_at=None):
+    def set_source(self, image, serial, captured_at=None, obstacle=None, warning=''):
         self.cancel_arrow_edit()
         self.source = image
         self.source_device = serial
         self.captured_at = captured_at if captured_at is not None else time.monotonic()
+        self.sampled_obstacle = obstacle
+        if obstacle and obstacle.measured_speed is not None:
+            self.orbit_speed.setValue(obstacle.measured_speed)
+            self.orbit_direction.setCurrentIndex(0 if obstacle.measured_clockwise else 1)
         self.next_action_at = 0.
         self.timer_deadline = None
         self.timer_running.blockSignals(True)
@@ -346,6 +357,12 @@ class MainWindow(QMainWindow):
         self.view.show_crop(self.crop)
         self.progress_label.setText("尚未执行")
         self.message("已获取手机原始截图" if serial else "当前图像未绑定设备，请获取手机截图后执行")
+        if warning:
+            self.message("小豆豆测速失败："+warning+"；当前沿用手动速度和方向，请核对后执行")
+        elif obstacle and obstacle.measured_speed is not None:
+            direction = '顺时针' if obstacle.measured_clockwise else '逆时针'
+            self.message(f"两帧间隔 {obstacle.sample_interval:.2f} 秒，小豆豆 {direction} {obstacle.measured_speed:.1f} px/s；以第二帧位置开始预测。")
+        self.update_orbit_preview()
         self._update_controls()
 
     def invalidate(self):
@@ -379,6 +396,8 @@ class MainWindow(QMainWindow):
 
     def recognized(self, result):
         self.board = result.board
+        if self.sampled_obstacle:
+            self.board.orbit_obstacle = deepcopy(self.sampled_obstacle)
         self.crop = self.board.crop_rect
         self.view.show_crop(self.crop)
         self.countdown.blockSignals(True)
@@ -391,7 +410,7 @@ class MainWindow(QMainWindow):
         for channel in self.board.turn_channels:
             self.message(f"转弯通道 {channel.id}：两端可进入，再通过 {channel.remaining} 支后消失，请核对读数和开口")
         if self.board.orbit_obstacle:
-            self.message("检测到小豆豆轨道；默认顺时针 118 像素/秒，按出口时间窗口简单避让，执行不核验是否退回。")
+            self.message("小豆豆按面板速度和方向预测移动；示意图标记预测位置，执行不核验是否退回。")
         for issue in self.board.issues:
             self.message(issue)
         self.recompute()
@@ -466,6 +485,19 @@ class MainWindow(QMainWindow):
         if self.source is not None:
             self.view.set_image(overlay(self.source, self.board, self.plan, self.preview)
                                 if self.board else self.source)
+
+    def update_orbit_preview(self, *_):
+        obstacle = self.board.orbit_obstacle if self.board else self.sampled_obstacle
+        if obstacle is None or self.captured_at is None:
+            self.view.show_orbit(None)
+            return
+        speed = self.orbit_speed.value()
+        clockwise = self.orbit_direction.currentIndex()==0
+        elapsed = max(0.,time.monotonic()-self.captured_at)
+        center = predicted_position(obstacle,elapsed,speed,clockwise)
+        trail = [predicted_position(obstacle,elapsed+t,speed,clockwise) for t in np.linspace(0,1.,25)]
+        self.view.show_orbit(center,obstacle.radius,trail,
+                             f"预测位置 · {'顺' if clockwise else '逆'}时针 {speed:.1f} px/s")
 
     def point_hovered(self, point):
         if point is None:
@@ -637,12 +669,19 @@ class MainWindow(QMainWindow):
             if auto_next:
                 return ContinuousPlay(device,control,self.run_root,report,delay=delay,
                                       flight_wait=flight_wait,**orbit_options).run()
-            return NextLevel(device,control,report).run()
+            result = NextLevel(device,control,report).run()
+            sample = capture_pair(device,control,first_image=result.image,first_at=result.captured_at,report=report)
+            return NextLevelResult(sample.image,sample.captured_at,sample.obstacle,sample.warning)
         self.work(run,self.execution_done,execution=True)
 
     def execution_event(self, kind, data):
+        if kind == 'orbit_sampling':
+            self.progress_label.setText(data['message'])
+            self.message(data['message'])
+            return
         if kind == "auto_level_source":
-            self.set_source(data['image'],self.selected_serial(),data['captured_at'])
+            self.set_source(data['image'],self.selected_serial(),data['captured_at'],
+                            data.get('obstacle'),data.get('warning',''))
             self.progress_label.setText("已进入下一关，正在自动识别…")
             return
         if kind == "auto_level_recognized":
@@ -697,7 +736,7 @@ class MainWindow(QMainWindow):
 
     def execution_done(self, cursor):
         if isinstance(cursor,NextLevelResult):
-            self.set_source(cursor.image,self.selected_serial(),cursor.captured_at)
+            self.set_source(cursor.image,self.selected_serial(),cursor.captured_at,cursor.obstacle,cursor.warning)
             self.message("已进入下一关并更新截图，请识别并核对新棋盘")
             return
         self.cursor = cursor

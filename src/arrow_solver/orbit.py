@@ -1,5 +1,7 @@
 """Rectangular moving obstacle detection and a simple exit timing filter."""
 from math import isfinite
+from dataclasses import dataclass
+import time
 import cv2
 import numpy as np
 from .models import OrbitObstacle
@@ -73,6 +75,84 @@ def phase(rect,point):
     side = min(range(4),key=lambda i:[abs(py-y),abs(px-x-w),abs(py-y-h),abs(px-x)][i])
     return [max(0,min(w,px-x)),w+max(0,min(h,py-y)),
             w+h+max(0,min(w,x+w-px)),2*w+h+max(0,min(h,y+h-py))][side]
+
+
+def position(rect, distance):
+    """Inverse of clockwise phase, including corner and lap crossings."""
+    x,y,w,h = rect
+    distance %= 2*(w+h)
+    if distance <= w:
+        return x+distance,y
+    distance -= w
+    if distance <= h:
+        return x+w,y+distance
+    distance -= h
+    if distance <= w:
+        return x+w-distance,y+h
+    return x,y+h-(distance-w)
+
+
+def predicted_position(obstacle, elapsed, speed=118., clockwise=True):
+    sign = 1 if clockwise else -1
+    return position(obstacle.track_rect,phase(obstacle.track_rect,obstacle.center)+sign*speed*max(0.,elapsed))
+
+
+def measure(first, second, interval):
+    if not isfinite(interval) or not .25 <= interval <= 10:
+        raise ValueError('两帧间隔不足或过长，无法测量小豆豆速度')
+    tolerance = max(6., second.track_rect[2]*.01)
+    if max(abs(a-b) for a,b in zip(first.track_rect,second.track_rect)) > tolerance:
+        raise ValueError('两帧轨道范围不同，请重新抓图')
+    perimeter = 2*sum(second.track_rect[2:])
+    # Use rail distance, not straight-line displacement, when crossing corners.
+    distance = (phase(second.track_rect,second.center)-phase(second.track_rect,first.center)+perimeter/2)%perimeter-perimeter/2
+    speed = abs(distance)/interval
+    if abs(distance) < max(2.,second.radius*.1) or abs(distance) >= perimeter/4 or not 1 <= speed <= 3000:
+        raise ValueError('小豆豆位移不足或有歧义，无法确认移动速度')
+    second.measured_speed = speed
+    second.measured_clockwise = distance > 0
+    second.sample_interval = interval
+    return second
+
+
+@dataclass
+class OrbitCapture:
+    image: np.ndarray
+    captured_at: float
+    obstacle: OrbitObstacle | None
+    warning: str = ''
+
+
+def capture_pair(device, control, *, first_image=None, first_at=None,
+                 now=time.monotonic, interval=.8, report=lambda kind,data:None):
+    """At most two pre-execution frames; the second frame becomes the source."""
+    def shot():
+        control.check()
+        start = now()
+        image = device.screenshot()
+        end = now()
+        control.check()
+        return image,(start+end)/2
+    if first_image is None:
+        first_image,first_at = shot()
+    if first_at is None:
+        raise ValueError('缺少第一帧抓图时间')
+    first = detect(first_image)
+    if first is None:
+        return OrbitCapture(first_image,first_at,None)
+    report('orbit_sampling',{'message':'检测到小豆豆，正在获取第二帧测量速度…'})
+    control.wait(max(0.,first_at+interval-now()))
+    image,captured_at = shot()
+    second = detect(image)
+    try:
+        if image.shape != first_image.shape or second is None:
+            raise ValueError('第二帧未确认同一轨道和小豆豆，请重新抓图')
+        measure(first,second,captured_at-first_at)
+    except ValueError as exc:
+        # Keep a detected position, but never disguise fallback as measurement.
+        return OrbitCapture(image if second else first_image,
+                            captured_at if second else first_at,second or first,str(exc))
+    return OrbitCapture(image,captured_at,second)
 
 
 def exit_phases(board,arrow,counts):

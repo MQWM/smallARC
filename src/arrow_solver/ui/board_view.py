@@ -1,7 +1,7 @@
 import numpy as np
-from PySide6.QtCore import Qt, QRectF, Signal, QEvent
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QPainterPath
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsRectItem
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QEvent
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QPainterPath, QColor, QBrush
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsItem
 
 
 class BoardView(QGraphicsView):
@@ -33,6 +33,7 @@ class BoardView(QGraphicsView):
         self.snap_point = lambda point: point
         self.edit_click_point = None
         self.auto_fit = True
+        self.orbit_items = None
         self.setMinimumSize(420, 540)
 
     def set_image(self, bgr, reset=False):
@@ -53,6 +54,52 @@ class BoardView(QGraphicsView):
         if self.pixmap_item:
             self.auto_fit = True
             self.fitInView(self.pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def show_orbit(self, center, radius=0., trail=(), caption=''):
+        if center is None:
+            for item in self.orbit_items or ():
+                item.hide()
+            return
+        if self.orbit_items is None:
+            pen = QPen(QColor(0,230,255),2)
+            pen.setCosmetic(True)
+            circle = self.scene().addEllipse(QRectF(),pen,QBrush(QColor(0,230,255,100)))
+            path = self.scene().addPath(QPainterPath(),pen)
+            text = self.scene().addSimpleText('')
+            text.setBrush(QBrush(QColor(0,230,255)))
+            text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+            self.orbit_items = circle,path,text
+            for item in self.orbit_items:
+                item.setZValue(4)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        circle,path,text = self.orbit_items
+        x,y = center
+        circle.setRect(QRectF(x-radius,y-radius,radius*2,radius*2))
+        shape = QPainterPath()
+        if len(trail)>1:
+            shape.moveTo(*trail[0])
+            for p in trail[1:]:
+                shape.lineTo(*p)
+            last,previous = np.array(trail[-1]),np.array(trail[-2])
+            direction = last-previous
+            length = np.linalg.norm(direction)
+            if length>0:
+                direction /= length
+                normal = np.array([-direction[1],direction[0]])
+                tip_size = 12/max(.05,abs(self.transform().m11()))
+                for side in (-1,1):
+                    shape.moveTo(*last)
+                    shape.lineTo(*(last-direction*tip_size+normal*side*tip_size*.5))
+        path.setPath(shape)
+        text.setText(caption)
+        anchor = self.mapFromScene(QPointF(x,y))
+        label_x = max(4,min(anchor.x()+radius*abs(self.transform().m11())+8,
+                          self.viewport().width()-text.boundingRect().width()-4))
+        label_y = max(4,min(anchor.y()-radius*abs(self.transform().m11())-25,
+                          self.viewport().height()-text.boundingRect().height()-4))
+        text.setPos(self.mapToScene(round(label_x),round(label_y)))
+        for item in self.orbit_items:
+            item.show()
 
     def resizeEvent(self,event):
         super().resizeEvent(event)

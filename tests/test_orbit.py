@@ -9,8 +9,68 @@ from arrow_solver.solver import solve
 from arrow_solver.executor import Executor,ScreenValidator,ExecutionError,Cancelled
 from test_executor import scene,FakeDevice
 from test_next_level import ClockControl
+from arrow_solver.orbit import position,predicted_position,measure,capture_pair
 
 FIXTURES = Path(__file__).parent/'fixtures/recorded'
+
+
+def test_two_frame_measurement_uses_recorded_positions_and_roundtrips(tmp_path):
+    first = detect(read_image(FIXTURES/'level332.png'))
+    second = detect(read_image(FIXTURES/'level332-later.png'))
+    measure(first,second,.968007)
+    assert second.measured_clockwise is True
+    assert second.measured_speed == pytest.approx(117.915,abs=1)
+    assert predicted_position(second,.1,second.measured_speed,True)[1] == pytest.approx(second.center[1]-11.7915,abs=1)
+    _,board = scene()
+    board.orbit_obstacle = second
+    board.save(tmp_path/'board.json')
+    assert Board.load(tmp_path/'board.json').fingerprint() == board.fingerprint()
+
+
+@pytest.mark.parametrize('start,end,clockwise',[(390,20,True),(20,390,False),(90,120,True)])
+def test_measure_crosses_lap_and_corner(start,end,clockwise):
+    rect = (0,0,100,100)
+    first = OrbitObstacle(rect,position(rect,start),5,[])
+    second = OrbitObstacle(rect,position(rect,end),5,[])
+    measure(first,second,1)
+    assert second.measured_speed == pytest.approx(30)
+    assert second.measured_clockwise is clockwise
+    assert phase(rect,predicted_position(second,1,30,clockwise)) == pytest.approx((end+(30 if clockwise else -30))%400)
+
+
+def test_pair_only_captures_second_frame_when_bean_present():
+    clock = ClockControl()
+    images = [read_image(FIXTURES/'level332.png'),read_image(FIXTURES/'level332-later.png')]
+    calls = []
+    class Device:
+        def screenshot(self):
+            image = images[len(calls)]
+            calls.append(clock.t)
+            clock.t += .1
+            return image
+    sample = capture_pair(Device(),clock,now=lambda:clock.t)
+    assert len(calls)==2 and not sample.warning
+    assert sample.image is images[1]
+    assert sample.captured_at == pytest.approx(calls[-1]+.05)
+    assert sample.obstacle.sample_interval == pytest.approx(.85)
+    assert sample.obstacle.measured_clockwise
+    normal,_ = scene()
+    images[:] = [normal]
+    calls.clear()
+    assert capture_pair(Device(),clock,now=lambda:clock.t).obstacle is None
+    assert len(calls)==1
+
+
+def test_sampling_failure_is_explicit_and_stop_prevents_second_capture():
+    image = read_image(FIXTURES/'level332.png')
+    clock = ClockControl()
+    class Device:
+        def screenshot(self):return image
+    sample = capture_pair(Device(),clock,now=lambda:clock.t)
+    assert sample.warning and sample.obstacle.measured_speed is None
+    clock.cancel.set()
+    with pytest.raises(Cancelled):
+        capture_pair(Device(),clock,now=lambda:clock.t)
 
 
 @pytest.mark.parametrize('scale',[.75,1.,1.25])

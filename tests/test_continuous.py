@@ -11,6 +11,42 @@ from test_next_level import ClockControl
 from arrow_solver.vision import read_image
 
 
+@pytest.mark.parametrize('moving',[True,False])
+def test_auto_level_samples_bean_and_passes_second_frame_measurement(tmp_path,monkeypatch,moving):
+    fixtures = Path(__file__).parent/'fixtures/recorded'
+    first = read_image(fixtures/'level332.png')
+    second = read_image(fixtures/('level332-later.png' if moving else 'level332.png'))
+    clock = ClockControl()
+    monkeypatch.setattr('arrow_solver.continuous.NextLevel.run',lambda _:NextLevelResult(first,0.))
+    calls,options,events = [],[],[]
+    class Device:
+        serial = 'fake'
+        def screenshot(self):
+            calls.append(1)
+            clock.t += .1
+            return second
+        def tap(self,*point):pytest.fail('no real taps in measurement test')
+    class Execution:
+        def __init__(self,device,board,plan,source,*args,**kwargs):
+            assert source is second
+            assert board.orbit_obstacle.measured_speed > 0
+            options.append(kwargs)
+        def run(self):raise Cancelled('test stopped before taps')
+    monkeypatch.setattr('arrow_solver.continuous.Executor',Execution)
+    runner = ContinuousPlay(Device(),clock,tmp_path,lambda kind,data:events.append((kind,data)),now=lambda:clock.t)
+    with pytest.raises(Cancelled if moving else ExecutionError):
+        runner.run()
+    assert len(calls)==1
+    data = next(data for kind,data in events if kind=='auto_level_source')
+    assert data['image'] is second and data['captured_at']==pytest.approx(.85)
+    if moving:
+        assert options[0]['orbit_speed']==data['obstacle'].measured_speed
+        assert options[0]['orbit_clockwise'] is True
+        assert options[0]['captured_at']==data['captured_at']
+    else:
+        assert data['warning'] and not options
+
+
 def setup_levels(monkeypatch,control,boards):
     calls = []
     image,_ = scene()

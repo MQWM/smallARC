@@ -10,12 +10,15 @@ import numpy as np
 
 from .executor import ExecutionError
 from .vision import read_image, recognize
+from .models import OrbitObstacle
 
 
 @dataclass
 class NextLevelResult:
     image: np.ndarray
     captured_at: float
+    obstacle: OrbitObstacle | None = None
+    warning: str = ''
 
 
 @lru_cache(maxsize=3)
@@ -94,6 +97,7 @@ class NextLevel:
             self.control.check()
             captured_at = self.now()
             image = self.device.screenshot()
+            captured_at = (captured_at+self.now())/2
             self.control.check()
             point = next_button(image)
             if previous_header is None:

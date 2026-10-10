@@ -21,6 +21,7 @@ def overlay(image, board: Board, plan: Plan | None = None, preview: int = -1):
         x,y,w,h = map(round,o.track_rect)
         cv2.rectangle(canvas,(x,y),(x+w,y+h),(0,180,255),max(1,round(scale)))
         cv2.circle(canvas,tuple(map(round,o.center)),round(o.radius),(0,180,255),max(1,round(scale)))
+        cv2.putText(canvas,'CAPTURE',tuple(map(round,(o.center[0]+o.radius+4,o.center[1]))),cv2.FONT_HERSHEY_SIMPLEX,.4*scale,(0,180,255),max(1,round(scale)),cv2.LINE_AA)
         cv2.putText(canvas,'ORBIT',(x,y-8),cv2.FONT_HERSHEY_SIMPLEX,.4*scale,(0,180,255),max(1,round(scale)),cv2.LINE_AA)
     for portal in board.portals:
         center = tuple(round(v) for v in portal.center)

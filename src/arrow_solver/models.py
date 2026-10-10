@@ -63,6 +63,9 @@ class OrbitObstacle:
     center: tuple[float,float]
     radius: float
     ignored_regions: list[tuple[int,int,int,int]]
+    measured_speed: float | None = None
+    measured_clockwise: bool | None = None
+    sample_interval: float | None = None
 
 
 @dataclass
@@ -121,7 +124,8 @@ class Board:
         if data.get('orbit_obstacle'):
             o = data['orbit_obstacle']
             data['orbit_obstacle'] = OrbitObstacle(tuple(o['track_rect']),tuple(o['center']),o['radius'],
-                                                  [tuple(r) for r in o['ignored_regions']])
+                                                  [tuple(r) for r in o['ignored_regions']],
+                                                  o.get('measured_speed'),o.get('measured_clockwise'),o.get('sample_interval'))
         return cls(**data)
 
 

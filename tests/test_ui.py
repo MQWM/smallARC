@@ -27,6 +27,29 @@ def sample():
     return read_image(Path(__file__).parent / "fixtures" / "level2.jpg")
 
 
+def test_moving_orbit_preview_reuses_scene_items_and_hides_for_normal_level(window,app,monkeypatch):
+    from arrow_solver.orbit import detect,measure,predicted_position
+    fixtures = Path(__file__).parent/'fixtures/recorded'
+    first = detect(read_image(fixtures/'level332.png'))
+    image = read_image(fixtures/'level332-later.png')
+    second = measure(first,detect(image),.968007)
+    monkeypatch.setattr('arrow_solver.ui.main_window.time.monotonic',lambda:100.)
+    window.set_source(image,'fake',99.,second)
+    assert window.orbit_speed.value() == pytest.approx(second.measured_speed,abs=.01)
+    circle,path,text = window.view.orbit_items
+    center = circle.rect().center()
+    expected = predicted_position(second,1,window.orbit_speed.value(),True)
+    assert (center.x(),center.y()) == pytest.approx(expected)
+    original_items = len(window.view.scene().items())
+    monkeypatch.setattr('arrow_solver.ui.main_window.time.monotonic',lambda:101.)
+    window.update_orbit_preview()
+    assert circle.rect().center()!=center
+    assert len(window.view.scene().items())==original_items
+    assert '预测位置' in text.text() and path.path().elementCount()>1
+    window.set_source(sample(),'fake',101.)
+    assert not any(item.isVisible() for item in window.view.orbit_items)
+
+
 def test_preview_never_enables_offline_execution(window, app):
     image = sample()
     window.set_source(image, None)
