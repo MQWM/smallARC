@@ -8,7 +8,7 @@ from image_assertions import ScreenVerifier
 from arrow_solver.models import Board
 from arrow_solver.solver import solve
 from path_helpers import expand_vertices
-from arrow_solver.vision import recognize, read_image, thin
+from arrow_solver.vision import recognize, read_image, thin, suggest_crop
 
 SAMPLE = Path(__file__).parent / "fixtures" / "level2.jpg"
 
@@ -85,3 +85,40 @@ def test_tracing_recovers_eroded_diagonal_tail():
     assert np.linalg.norm(path[0]-[15,15]) < 8
     assert path_covers_body(mask,path,np.array([140.,115.]),8.)
     assert not path_covers_body(mask,path[path[:,1]>65],np.array([140.,115.]),8.)
+
+
+@pytest.mark.parametrize("scale", [.75, 1., 1.25])
+def test_347_crop_contains_all_groups_at_different_scales(scale):
+    image = read_image(Path(__file__).parent / "fixtures/recorded/level347.png")
+    image = cv2.resize(image, None, fx=scale, fy=scale)
+    x, y, w, h = suggest_crop(image)
+    assert x < 248 * scale and x + w > 1037 * scale
+    assert y < 741 * scale and y + h > 1708 * scale
+
+
+def test_347_disconnected_groups_are_all_recognized():
+    from arrow_solver.executor import ScreenValidator
+    image = read_image(Path(__file__).parent / "fixtures/recorded/level347.png")
+    board = recognize(image).board
+    assert not board.issues
+    assert len(board.arrows) == 56
+    assert sum(a.click_point[1] < 1207 for a in board.arrows) == 10
+    assert len(solve(board).order) == 56
+    ScreenValidator(image, board)
+
+
+def test_crop_keeps_thin_isolated_objects_and_excludes_ui_and_grid():
+    image = np.full((1000, 500, 3), (80, 65, 60), np.uint8)
+    # Broad UI regions must not outvote a sparse board.
+    cv2.rectangle(image, (10, 20), (490, 130), (240, 240, 240), -1)
+    cv2.rectangle(image, (10, 920), (490, 980), (240, 240, 240), -1)
+    for y in range(200, 850, 20):
+        cv2.circle(image, (30, y), 1, (180, 180, 180), -1)
+    # Only three foreground pixels in each row: the old density cutoff loses it.
+    cv2.line(image, (150, 250), (150, 290), (100, 220, 240), 2)
+    cv2.line(image, (250, 600), (350, 800), (240, 180, 100), 4)
+    # Unknown objects stay in the crop so recognition can report them.
+    cv2.rectangle(image, (430, 400), (445, 415), (150, 220, 150), -1)
+    x, y, w, h = suggest_crop(image)
+    assert 30 < x < 149 and 150 <= y < 249
+    assert x + w > 445 and 802 < y + h <= 900

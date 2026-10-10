@@ -90,46 +90,38 @@ def repair_small_color_gaps(image, mask):
 
 
 def suggest_crop(image: np.ndarray) -> tuple[int, int, int, int]:
-    """Suggest the dense central gameplay band; user can override on the image."""
+    """Include disconnected gameplay objects; user can override on the image."""
     h, w = image.shape[:2]
     from .orbit import detect
     orbit = detect(image)
     if orbit:
         x,y,bw,bh = orbit.track_rect
         return (round(x+4),round(y+4),round(bw-8),round(bh-8))
-    mask = foreground_mask(image)
-    count = (mask > 0).sum(axis=1)
-    active = count > max(6, w * .015)
-    # UI and board are separated by large empty horizontal bands in this game.
-    bands = []
-    start = None
-    last = None
-    gap = max(8, h // 80)
-    for y in np.flatnonzero(active):
-        if start is None:
-            start = int(y)
-        elif y - last > gap:
-            bands.append((start, int(last)))
-            start = int(y)
-        last = int(y)
-    if start is not None:
-        bands.append((start, last))
-    if not bands:
-        raise RecognitionError("图片没有可识别的前景")
-    from .channels import find_channels
-    middle = (0,round(h*.15),w,round(h*.75))
-    lanes = find_channels(image,middle)
-    gameplay = [b for b in bands if b[0]>h*.15 and b[1]<h*.9]
-    if lanes and gameplay:
-        # A sparse tutorial can contain several separate arrow bands, all
-        # shorter than the toolbar. Include every gameplay band and its lanes.
-        top,bottom = min(b[0] for b in gameplay),max(b[1] for b in gameplay)
-    else:
-        top, bottom = max(bands, key=lambda b: b[1] - b[0])
-    ys, xs = np.nonzero(mask[top:bottom + 1])
-    pad = max(6, round(w * .012))
-    left, right = max(0, int(xs.min()) - pad), min(w, int(xs.max()) + pad + 1)
-    top, bottom = max(0, top - pad), min(h, bottom + pad + 1)
+    # The header and toolbar sit outside this game area. Empty rows inside it
+    # do not divide a board: e.g. level 347 has three separated arrow groups.
+    area_top, area_bottom = round(h * .15), round(h * .9)
+    mask = foreground_mask(image)[area_top:area_bottom]
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+    minimum_area = max(12, w * h * .000005)
+    minimum_extent = max(5, w * .006)
+    candidates = [i for i in range(1, len(stats))
+                  if stats[i, 4] >= minimum_area
+                  and max(stats[i, 2:4]) >= minimum_extent]
+    if not candidates:
+        raise RecognitionError("游戏区域没有可识别的前景")
+    # Keep unknown sizable objects too; recognition must report them rather
+    # than silently shrinking the crop around only the recognized arrows.
+    objects = stats[candidates]
+    left, top = objects[:, :2].min(axis=0)
+    right, bottom = (objects[:, :2] + objects[:, 2:4]).max(axis=0)
+    selected = np.isin(labels, candidates).astype(np.uint8)
+    dt = cv2.distanceTransform(selected, cv2.DIST_L2, 5)
+    maxima = (dt >= cv2.dilate(dt, np.ones((3, 3), np.uint8))) & (dt > 1)
+    line_width = 2 * float(np.median(dt[maxima])) if maxima.any() else 2.
+    pad = max(6, round(w * .012), round(line_width * 2))
+    left, right = max(0, int(left) - pad), min(w, int(right) + pad)
+    top = max(area_top, area_top + int(top) - pad)
+    bottom = min(area_bottom, area_top + int(bottom) + pad)
     return left, top, right - left, bottom - top
 
 
