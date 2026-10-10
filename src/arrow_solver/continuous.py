@@ -12,11 +12,11 @@ from .vision import recognize
 class ContinuousPlay:
     """One frozen plan per level; only capture again between levels."""
     def __init__(self,device,control,run_root,report,*,delay=.4,flight_wait=5.,
-                 next_report=None,now=time.monotonic,orbit_period=37.,orbit_window=3.,orbit_clockwise=True):
+                 next_report=None,now=time.monotonic,orbit_speed=118.,orbit_window=3.,orbit_clockwise=True):
         self.device,self.control,self.run_root,self.report = device,control,run_root,report
         self.delay,self.flight_wait,self.now = delay,flight_wait,now
         self.next_report = next_report or report
-        self.orbit_options = dict(orbit_period=orbit_period,orbit_window=orbit_window,orbit_clockwise=orbit_clockwise)
+        self.orbit_options = dict(orbit_speed=orbit_speed,orbit_window=orbit_window,orbit_clockwise=orbit_clockwise)
 
     def run(self):
         while True:

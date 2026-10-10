@@ -156,11 +156,12 @@ class MainWindow(QMainWindow):
         exec_layout.addLayout(delay_row)
         self.orbit_group = QGroupBox("小豆豆避让 · 估计位置，中途不抓图")
         orbit_form = QFormLayout(self.orbit_group)
-        self.orbit_period = QDoubleSpinBox()
-        self.orbit_period.setRange(5.,300.)
-        self.orbit_period.setValue(37.)
-        self.orbit_period.setSuffix(" 秒")
-        orbit_form.addRow("绕一圈时间",self.orbit_period)
+        self.orbit_speed = QDoubleSpinBox()
+        self.orbit_speed.setRange(1.,3000.)
+        self.orbit_speed.setValue(118.)
+        self.orbit_speed.setSuffix(" px/s")
+        self.orbit_speed.setToolTip("手机原始截图坐标中的像素/秒；地图变大时绕圈时间自动变长。")
+        orbit_form.addRow("小豆豆速度",self.orbit_speed)
         self.orbit_direction = QComboBox()
         self.orbit_direction.addItems(["顺时针","逆时针"])
         orbit_form.addRow("移动方向",self.orbit_direction)
@@ -390,7 +391,7 @@ class MainWindow(QMainWindow):
         for channel in self.board.turn_channels:
             self.message(f"转弯通道 {channel.id}：两端可进入，再通过 {channel.remaining} 支后消失，请核对读数和开口")
         if self.board.orbit_obstacle:
-            self.message("检测到小豆豆轨道；默认顺时针 37 秒/圈，按出口时间窗口简单避让，执行不核验是否退回。")
+            self.message("检测到小豆豆轨道；默认顺时针 118 像素/秒，按出口时间窗口简单避让，执行不核验是否退回。")
         for issue in self.board.issues:
             self.message(issue)
         self.recompute()
@@ -605,7 +606,7 @@ class MainWindow(QMainWindow):
         duration = self.countdown.value() if has_timer else None
         auto_next = self.auto_next.isChecked()
         captured_at = self.captured_at
-        orbit_options = dict(orbit_period=self.orbit_period.value(),orbit_window=self.orbit_window.value(),
+        orbit_options = dict(orbit_speed=self.orbit_speed.value(),orbit_window=self.orbit_window.value(),
                              orbit_clockwise=self.orbit_direction.currentIndex()==0)
 
         def run(report):
@@ -630,7 +631,7 @@ class MainWindow(QMainWindow):
         self.control = ExecutionControl()
         device,control = AndroidDevice(serial,self.adb),self.control
         auto_next,delay,flight_wait = self.auto_next.isChecked(),self.delay.value(),self.flight_wait.value()
-        orbit_options = dict(orbit_period=self.orbit_period.value(),orbit_window=self.orbit_window.value(),
+        orbit_options = dict(orbit_speed=self.orbit_speed.value(),orbit_window=self.orbit_window.value(),
                              orbit_clockwise=self.orbit_direction.currentIndex()==0)
         def run(report):
             if auto_next:

@@ -100,11 +100,11 @@ def exit_phases(board,arrow,counts):
     return results
 
 
-def wait_seconds(obstacle,exits,elapsed,period=37.,window=3.,clockwise=True,line_width=8.):
-    if not all(isfinite(v) for v in (elapsed,period,window)) or period<=0 or window<0 or elapsed<0:
+def wait_seconds(obstacle,exits,elapsed,speed=118.,window=3.,clockwise=True,line_width=8.):
+    if not all(isfinite(v) for v in (elapsed,speed,window)) or speed<=0 or window<0 or elapsed<0:
         raise ValueError('小豆豆速度、避让窗口或抓图时间无效')
     perimeter = 2*sum(obstacle.track_rect[2:])
-    speed = perimeter/period
+    period = perimeter/speed
     sign = 1 if clockwise else -1
     current = (phase(obstacle.track_rect,obstacle.center)+sign*speed*elapsed)%perimeter
     # Fixed capture/dispatch margin plus a small allowance for guessed speed drift.

@@ -125,7 +125,7 @@ class Executor:
                  delay: float = .35, *, timer_deadline: float | None = None,
                  timer_duration: float | None = None, flight_wait: float = 5.,
                  not_before: float = 0., counter_settle: float = 2., now=time.monotonic,
-                 captured_at: float | None = None, orbit_period: float = 37.,
+                 captured_at: float | None = None, orbit_speed: float = 118.,
                  orbit_window: float = 3., orbit_clockwise: bool = True):
         verify_plan(board,plan)
         if board.issues:
@@ -138,7 +138,7 @@ class Executor:
         self.arrows = {a.id:a for a in board.arrows}
         self.timers = {a.id for a in board.arrows if a.kind=='timer'}
         self.captured_at = captured_at
-        self.orbit_period,self.orbit_window,self.orbit_clockwise = orbit_period,orbit_window,orbit_clockwise
+        self.orbit_speed,self.orbit_window,self.orbit_clockwise = orbit_speed,orbit_window,orbit_clockwise
         if board.orbit_obstacle:
             if captured_at is None:
                 raise ExecutionError('移动机关缺少抓图时间，请重新获取截图')
@@ -146,10 +146,11 @@ class Executor:
                 raise ExecutionError('小豆豆与自动发射子弹组合暂不支持，请手动处理')
             from .orbit import wait_seconds
             try:
-                wait_seconds(board.orbit_obstacle,[],now()-captured_at,orbit_period,orbit_window,
+                wait_seconds(board.orbit_obstacle,[],now()-captured_at,orbit_speed,orbit_window,
                              orbit_clockwise,board.line_width)
             except ValueError as exc:
                 raise ExecutionError(str(exc)) from exc
+            self.orbit_cycle = 2*sum(board.orbit_obstacle.track_rect[2:])/orbit_speed
         self.timer_deadline,self.timer_duration = timer_deadline,timer_duration
         self.flight_wait,self.not_before,self.now = flight_wait,not_before,now
         self.counter_settle = max(0.,counter_settle)
@@ -220,7 +221,7 @@ class Executor:
         self.control.wait(max(0.,self.not_before-self.now()))
         self.log('ready',step=start,mode='batch_no_capture')
         if self.board.orbit_obstacle:
-            self.log('orbit_settings',period=self.orbit_period,window=self.orbit_window,
+            self.log('orbit_settings',speed=self.orbit_speed,period=self.orbit_cycle,window=self.orbit_window,
                      clockwise=self.orbit_clockwise,capture_age=self.now()-self.captured_at)
         for index in range(start,len(self.plan.order)):
             self.control.check()
@@ -249,13 +250,13 @@ class Executor:
                         self.control.check()
                         try:
                             wait = wait_seconds(self.board.orbit_obstacle,exits,self.now()-self.captured_at,
-                                                self.orbit_period,self.orbit_window,self.orbit_clockwise,
+                                                self.orbit_speed,self.orbit_window,self.orbit_clockwise,
                                                 self.board.line_width) if exits else 0.
                         except ValueError as exc:
                             raise ExecutionError(str(exc)) from exc
                         if wait<=1e-6:
                             break
-                        if self.now()-wait_started+wait>self.orbit_period:
+                        if self.now()-wait_started+wait>self.orbit_cycle:
                             raise ExecutionError('一圈内未找到小豆豆安全出口窗口，请调整避让参数或重新抓图')
                         self.log('waiting_orbit',step=index,arrow=aid,seconds=wait)
                         self.control.wait(wait+ .01)

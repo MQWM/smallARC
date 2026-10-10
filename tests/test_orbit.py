@@ -37,17 +37,17 @@ def test_clockwise_phase_and_wrap_direction():
     rect=(0,0,100,100)
     assert [phase(rect,p) for p in [(0,0),(100,0),(100,100),(0,100),(0,10)]]==[0,100,200,300,390]
     o=OrbitObstacle(rect,(0,10),1,[])
-    assert wait_seconds(o,[5],0,40,3,True,0)>0
-    assert wait_seconds(o,[5],0,40,3,False,0)==0
-    assert wait_seconds(o,[5],3,40,3,True,0)==0
+    assert wait_seconds(o,[5],0,10,3,True,0)>0
+    assert wait_seconds(o,[5],0,10,3,False,0)==0
+    assert wait_seconds(o,[5],3,10,3,True,0)==0
 
 
 def test_exit_filter_predicts_near_future_not_only_current_distance():
     o=OrbitObstacle((0,0,100,100),(0,0),1,[])
-    assert wait_seconds(o,[20],0,40,3,True,0)==pytest.approx(2.6)
-    assert wait_seconds(o,[100],0,40,3,True,0)==0
+    assert wait_seconds(o,[20],0,10,3,True,0)==pytest.approx(2.6)
+    assert wait_seconds(o,[100],0,10,3,True,0)==0
     with pytest.raises(ValueError,match='过期'):
-        wait_seconds(o,[20],10000,40,3)
+        wait_seconds(o,[20],10000,10,3)
     with pytest.raises(ValueError,match='无效'):
         wait_seconds(o,[20],0,0,3)
 
@@ -94,7 +94,7 @@ def test_stop_during_avoidance_sends_no_click_and_resume_uses_original_capture_t
     with pytest.raises(Cancelled):ex.run()
     assert not device.taps
     clock.cancel.clear()
-    clock.t=5
+    clock.t=1.2
     events=[]
     resumed=Executor(device,board,solve(board),image,tmp_path,clock,
                      lambda kind,data:events.append(kind),now=lambda:clock.t,captured_at=0)
@@ -127,7 +127,7 @@ def test_332_all_111_taps_keep_nominal_exit_window_clear_without_captures(tmp_pa
             for target in exit_phases(board,arrow,{}):
                 # Check the complete nominal future window, including command latency.
                 for dt in np.linspace(0,3,61):
-                    at=(initial+perimeter/37*(clock.t+.2+dt))%perimeter
+                    at=(initial+118*(clock.t+.2+dt))%perimeter
                     gap=abs(at-target)
                     assert min(gap,perimeter-gap)>o.radius+board.line_width*.5
             seen.append(arrow.id)
@@ -168,3 +168,13 @@ def test_unknown_rail_items_are_ignored_without_color_specific_detection(color):
     assert mask[center[1]+10,center[0]]==0
     # A valid arrow near the top remains foreground.
     assert mask[556,175]>0
+
+
+def test_constant_speed_is_independent_of_track_perimeter():
+    small=OrbitObstacle((0,0,100,100),(0,0),1,[])
+    large=OrbitObstacle((0,0,200,200),(0,0),1,[])
+    # Same physical distance takes the same time on two differently sized maps.
+    assert wait_seconds(small,[20],0,speed=10,window=5,line_width=0)==pytest.approx(2.6)
+    assert wait_seconds(large,[20],0,speed=10,window=5,line_width=0)==pytest.approx(2.6)
+    # Twice the physical distance takes twice the travel time, plus the margin.
+    assert wait_seconds(large,[40],0,speed=10,window=5,line_width=0)==pytest.approx(4.6)

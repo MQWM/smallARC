@@ -252,7 +252,7 @@ def test_orbit_settings_only_appear_for_moving_obstacle_board(window,app):
     window.set_source(image,'fake',time.monotonic())
     window.recognized(recognize(image))
     assert not window.orbit_group.isHidden()
-    assert window.orbit_period.value()==37
+    assert window.orbit_speed.value()==118
     assert window.orbit_window.value()==3
     window.set_source(sample(),'fake')
     window.recognized(recognize(sample()))
