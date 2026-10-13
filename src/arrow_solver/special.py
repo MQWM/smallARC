@@ -43,7 +43,7 @@ def timer_mask(image, visual_rect, head_rect):
 
 
 def arrow_components(image, foreground, line_width=None):
-    """Separate confirmed broad skins from differently colored touching arrows."""
+    """Shared recognition/preflight partition for confirmed touching arrows."""
     count,labels,stats,centers = timer_separated_components(image,foreground,line_width)
     if line_width is None:
         distance = cv2.distanceTransform(foreground,cv2.DIST_L2,5)
@@ -101,6 +101,77 @@ def arrow_components(image, foreground, line_width=None):
                 new_stats[label] = (xx.min(),yy.min(),np.ptp(xx)+1,np.ptp(yy)+1,len(xx))
                 new_centers[label] = (xx.mean(),yy.mean())
         stats,centers = new_stats,new_centers
+    return color_separated_components(image,count,labels,stats,centers)
+
+
+def color_separated_components(image,count,labels,stats,centers):
+    """Split two distinct solid skins only when both recover complete arrows."""
+    from .vision import find_head,trace,RecognitionError
+    hsv = cv2.cvtColor(image,cv2.COLOR_BGR2HSV)
+    changed = False
+    for label in range(1,len(stats)):
+        x,y,w,h,area = stats[label]
+        if area<40 or min(w,h)<5:
+            continue
+        original = labels[y:y+h,x:x+w]==label
+        pixels = hsv[y:y+h,x:x+w]
+        colored = (pixels[:,:,1]>55)&(pixels[:,:,2]>100)&original
+        if colored.sum()<area*.95:
+            continue
+        hist = np.bincount(pixels[:,:,0][colored],minlength=180)
+        smooth = sum(np.roll(hist,i) for i in range(-3,4))
+        first = int(smooth.argmax())
+        hues = np.arange(180)
+        distance = np.minimum(abs(hues-first),180-abs(hues-first))
+        second_scores = np.where(distance>=18,smooth,0)
+        second = int(second_scores.argmax())
+        minimum = max(20,area*.08)
+        if second_scores[second]<minimum:
+            continue
+        # More than two substantial colors may be a special skin or ambiguous
+        # multi-arrow contact. Leave it for existing recognition to explain.
+        d2 = np.minimum(abs(hues-second),180-abs(hues-second))
+        if np.any(smooth[(distance>=18)&(d2>=18)]>=minimum):
+            continue
+        mask = np.pad(original.astype(np.uint8)*255,3)
+        dt = cv2.distanceTransform(mask,cv2.DIST_L2,5)
+        medial = (dt>=cv2.dilate(dt,np.ones((3,3),np.uint8)))&(dt>1)
+        width = 2*float(np.median(dt[medial])) if medial.any() else 2.
+        try:
+            tip,direction,_ = find_head(mask,width)
+            trace(mask,tip,direction,width)
+            continue  # A valid whole arrow, including multicolor skins, stays intact.
+        except RecognitionError:
+            pass
+        hue = pixels[:,:,0].astype(np.int16)
+        dist1 = np.minimum(abs(hue-first),180-abs(hue-first))
+        dist2 = np.minimum(abs(hue-second),180-abs(hue-second))
+        parts = [original&(dist1<=dist2),original&(dist2<dist1)]
+        if any(part.sum()<minimum for part in parts):
+            continue
+        valid = True
+        for part in parts:
+            # No discarded pixels, invented tails, or weakened branch checks.
+            yy,xx = np.nonzero(part)
+            part_mask = np.pad(part[yy.min():yy.max()+1,xx.min():xx.max()+1].astype(np.uint8)*255,3)
+            try:
+                tip,direction,_ = find_head(part_mask,width)
+                trace(part_mask,tip,direction,width)
+            except RecognitionError:
+                valid = False
+                break
+        if valid:
+            labels[y:y+h,x:x+w][parts[1]] = count
+            count += 1
+            changed = True
+    if changed:
+        stats = np.zeros((count,5),np.int32)
+        centers = np.zeros((count,2),float)
+        for label in range(count):
+            yy,xx = np.nonzero(labels==label)
+            if len(xx):
+                stats[label] = (xx.min(),yy.min(),np.ptp(xx)+1,np.ptp(yy)+1,len(xx))
+                centers[label] = (xx.mean(),yy.mean())
     return count,labels,stats,centers
 
 

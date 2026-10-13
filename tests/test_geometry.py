@@ -139,9 +139,14 @@ def test_level246_scaled_continuous_geometry(level246,scale):
     assert ScreenVerifier(resized,board).matches(resized,set())
 
 
-def test_level246_rejects_merged_heads_at_low_resolution(level246):
-    image,_ = level246
-    # At 75% two physically separate arrow tips merge through antialiasing.
-    # Preserve the ambiguity rejection instead of selecting a convenient head.
-    board = recognize(cv2.resize(image,None,fx=.75,fy=.75)).board
-    assert any('多个可能的头部' in issue for issue in board.issues)
+def test_level246_recovers_different_color_heads_at_low_resolution(level246):
+    from arrow_solver.executor import ScreenValidator
+    image,reference = level246
+    resized = cv2.resize(image,None,fx=.75,fy=.75)
+    board = recognize(resized).board
+    assert not board.issues and len(board.arrows)==79
+    signature = lambda b:{(tuple(a.cells),a.direction) for a in b.arrows}
+    assert signature(board)==signature(reference)
+    plan = solve(board)
+    assert len(plan.order)==79
+    ScreenValidator(resized,board)
