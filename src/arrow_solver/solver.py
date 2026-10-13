@@ -131,7 +131,7 @@ def dependencies(board,used):
 
 
 def solve(board: Board) -> Plan:
-    if board.turn_channels:
+    if board.turn_channels or board.teleport_gates:
         from .channels import solve as solve_channels
         plan = solve_channels(board)
         verify_plan(board,plan)
@@ -201,7 +201,7 @@ def solve(board: Board) -> Plan:
 
 
 def verify_plan(board: Board, plan: Plan) -> None:
-    if board.turn_channels:
+    if board.turn_channels or board.teleport_gates:
         from .channels import verify
         verify(board,plan)
         return

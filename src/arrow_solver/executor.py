@@ -59,7 +59,7 @@ class ScreenValidator:
             self.portal_mask[py-y:py-y+ph,px-x:px-x+pw] = True
         assigned.update(int(v) for v in np.unique(labels[self.portal_mask]) if v)
         self.block_masks=[]
-        for channel in board.turn_channels:
+        for channel in [*board.turn_channels,*board.teleport_gates]:
             cx,cy,cw,ch = channel.visual_rect
             region = labels[max(0,cy-y-2):min(h,cy-y+ch+2),max(0,cx-x-2):min(w,cx-x+cw+2)]
             overlaps = np.bincount(region.ravel(),minlength=len(counts))
@@ -99,7 +99,7 @@ class ScreenValidator:
             # A chosen point must identify the recognized path, not a neighboring instance.
             good = 0
             points = [board.pixel(cell) for cell in arrow.cells]
-            if arrow.launch_vectors or board.turn_channels:
+            if arrow.launch_vectors or board.turn_channels or board.teleport_gates:
                 points = []
                 for start,end in zip(arrow.pixel_path,arrow.pixel_path[1:]):
                     points.extend(np.linspace(start,end,max(2,int(np.linalg.norm(np.array(end)-start)/max(1,board.line_width*.5))+1)))

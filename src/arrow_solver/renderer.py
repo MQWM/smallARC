@@ -28,6 +28,33 @@ def overlay(image, board: Board, plan: Plan | None = None, preview: int = -1):
         radius = round(max(portal.visual_rect[2:])*.5)
         cv2.circle(canvas,center,radius,(80,230,255),max(1,round(scale)))
         cv2.putText(canvas,"EXIT",(center[0]+radius,center[1]),cv2.FONT_HERSHEY_SIMPLEX,.4*scale,(80,230,255),max(1,round(scale)),cv2.LINE_AA)
+    for gate in board.teleport_gates:
+        x,y,w,h = gate.visual_rect
+        cv2.rectangle(canvas,(x,y),(x+w,y+h),(255,230,70),max(1,round(scale)))
+        cv2.putText(canvas,f'TP{gate.id}->{gate.partner_id or "?"}',(x,y-7),cv2.FONT_HERSHEY_SIMPLEX,.4*scale,(255,230,70),max(1,round(scale)),cv2.LINE_AA)
+    if board.teleport_gates and plan and 0<=preview<len(plan.order):
+        from .channels import route
+        counts = {c.id:c.remaining for c in board.turn_channels}
+        for aid in plan.order[:preview]:
+            for cid in plan.channel_uses.get(aid,[]):
+                counts[cid]-=1
+        arrow = next(a for a in board.arrows if a.id==plan.order[preview])
+        segments,_,_ = route(board,arrow,counts)
+        previous = None
+        for a,b in segments:
+            if previous is not None and np.linalg.norm(np.array(a)-previous)>1:
+                # Dashes connect a teleport jump; only solid lines are flights.
+                delta = np.array(a)-previous
+                steps = max(1,int(np.linalg.norm(delta)/(8*scale)))
+                for i in range(0,steps,2):
+                    p = tuple(np.rint(previous+delta*i/steps).astype(int))
+                    q = tuple(np.rint(previous+delta*min(i+1,steps)/steps).astype(int))
+                    cv2.line(canvas,p,q,(170,170,170),max(1,round(scale)))
+            visible,p,q = cv2.clipLine(board.crop_rect,tuple(np.rint(a).astype(int)),tuple(np.rint(b).astype(int)))
+            if visible:
+                tip_length = min(.2,12*scale/max(1.,np.linalg.norm(np.array(q)-p)))
+                cv2.arrowedLine(canvas,p,q,(100,255,120),max(1,round(scale*2)),tipLength=tip_length)
+            previous = np.array(b)
     for block in board.counter_blocks:
         x,y,w,h = block.visual_rect
         cv2.rectangle(canvas,(x,y),(x+w,y+h),(0,255,255),max(1,round(scale)))
@@ -86,6 +113,7 @@ def export_run(root: Path, image, board: Board, plan: Plan | None):
                 "portals": [asdict(p) for p in board.portals],
                 "counter_blocks": [asdict(b) for b in board.counter_blocks],
                 "turn_channels": [asdict(c) for c in board.turn_channels],
+                "teleport_gates": [asdict(g) for g in board.teleport_gates],
                 "orbit_obstacle": asdict(board.orbit_obstacle) if board.orbit_obstacle else None,
                 "actions": [{"arrow": aid, "action": "wait_timer" if arrows[aid].kind == "timer" else "tap",
                              "point": None if arrows[aid].kind == "timer" else arrows[aid].click_point} for aid in plan.order],

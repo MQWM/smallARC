@@ -335,6 +335,7 @@ def fit_grid(paths: list[np.ndarray], line_width: float):
 def recognize(image: np.ndarray, crop=None) -> Recognition:
     from .orbit import detect,mask_objects
     from .channels import find_channels
+    from .teleport import find_gates
     from .special import find_timer_shape, read_countdown, find_wide_shape, find_portals, find_counter_blocks, flame_arrow_mask, arrow_components
     h, w = image.shape[:2]
     crop = tuple(crop or suggest_crop(image))
@@ -345,6 +346,7 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
     portals = find_portals(image, crop)
     counter_blocks = find_counter_blocks(image,crop)
     channels = find_channels(image,crop)
+    gates = find_gates(image,crop)
     orbit = detect(image)
     foreground = mask_objects(foreground_mask(roi),crop,orbit)
     n, labels, stats, _ = arrow_components(roi, foreground)
@@ -362,6 +364,9 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
             continue
         if any(px-2<=x+bx and py-2<=y+by and x+bx+bw<=px+pw+2 and y+by+bh<=py+ph+2
                for px,py,pw,ph in (c.visual_rect for c in channels)):
+            continue
+        if any(px-2<=x+bx and py-2<=y+by and x+bx+bw<=px+pw+2 and y+by+bh<=py+ph+2
+               for px,py,pw,ph in (g.visual_rect for g in gates)):
             continue
         mask = (labels[by:by + bh, bx:bx + bw] == label).astype(np.uint8) * 255
         mask = np.pad(mask, 3)
@@ -558,6 +563,9 @@ def recognize(image: np.ndarray, crop=None) -> Recognition:
     board.counter_blocks = [CounterBlock(board.cell(center), value, rect) for center,rect,value in counter_blocks]
     board.turn_channels = channels
     board.orbit_obstacle = orbit
+    board.teleport_gates = gates
+    if any(g.partner_id is None for g in gates):
+        board.issues.append('传送门配对不确定，目前仅支持一对同样式传送门')
     for channel in channels:
         if channel.remaining is None:
             board.issues.append(f'转弯通道 {channel.id} 的剩余次数不确定')

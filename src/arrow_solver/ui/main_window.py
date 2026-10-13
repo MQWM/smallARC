@@ -404,7 +404,10 @@ class MainWindow(QMainWindow):
         self.countdown.setValue(self.board.timer_seconds if self.board.timer_seconds is not None else -1)
         self.countdown.blockSignals(False)
         self.timer_confirmed.setChecked(False)
-        self.summary.setText(f"识别 {len(self.board.arrows)} 条箭头 · {len(self.board.portals)} 个黑瞳 · {len(self.board.counter_blocks)} 个数字障碍 · {len(self.board.turn_channels)} 个转弯通道 · {self.board.cols} 列 × {self.board.rows} 行\n网格间距 {self.board.grid_step[0]:.2f} / {self.board.grid_step[1]:.2f} px")
+        self.summary.setText(f"识别 {len(self.board.arrows)} 条箭头 · {len(self.board.portals)} 个黑瞳 · {len(self.board.counter_blocks)} 个数字障碍 · {len(self.board.turn_channels)} 个转弯通道 · {len(self.board.teleport_gates)} 个传送门 · {self.board.cols} 列 × {self.board.rows} 行\n网格间距 {self.board.grid_step[0]:.2f} / {self.board.grid_step[1]:.2f} px")
+        for gate in self.board.teleport_gates:
+            if gate.partner_id and gate.id<gate.partner_id:
+                self.message(f"传送门 #{gate.id} ↔ #{gate.partner_id}：保持方向、可双向传送；出门路径被挡时不能消除。点选步骤可查看路线，虚线表示传送。")
         for block in self.board.counter_blocks:
             self.message(f"数字障碍 {block.cell}：再成功消除 {block.remaining} 支箭头后消失，请核对读数")
         for channel in self.board.turn_channels:
@@ -691,7 +694,7 @@ class MainWindow(QMainWindow):
             self.countdown.blockSignals(True)
             self.countdown.setValue(self.board.timer_seconds if self.board.timer_seconds is not None else -1)
             self.countdown.blockSignals(False)
-            self.summary.setText(f"自动识别 {len(self.board.arrows)} 条箭头 · {len(self.board.turn_channels)} 个转弯通道 · {self.board.cols} 列 × {self.board.rows} 行")
+            self.summary.setText(f"自动识别 {len(self.board.arrows)} 条箭头 · {len(self.board.turn_channels)} 个转弯通道 · {len(self.board.teleport_gates)} 个传送门 · {self.board.cols} 列 × {self.board.rows} 行")
             for issue in self.board.issues:
                 self.message(issue)
             self.populate()

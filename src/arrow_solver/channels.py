@@ -102,6 +102,8 @@ def route(board,arrow,counts):
     direction = DIRECTIONS[arrow.direction]
     segments,uses = [],[]
     last = None
+    gate_map = {g.id:g for g in board.teleport_gates}
+    visited_gates = set()
     length = hypot(board.image_width,board.image_height)*2
     radius = board.line_width*.5
     while True:
@@ -115,15 +117,34 @@ def route(board,arrow,counts):
                 stop = min(stop,along)
         hits = []
         for channel in board.turn_channels:
-            if counts[channel.id]<=0 or channel.id==last:
+            if counts[channel.id]<=0 or ('channel',channel.id)==last:
                 continue
             t = _hit(start,d,channel.visual_rect)
             if t is not None and t<stop:
-                hits.append((t,channel.id,channel))
+                hits.append((t,0,channel.id,channel))
+        for gate in board.teleport_gates:
+            if ('gate',gate.id)==last:
+                continue
+            t = _hit(start,d,gate.visual_rect)
+            if t is not None and t<stop:
+                hits.append((t,1,gate.id,gate))
         if not hits:
             segments.append((start,(start[0]+d[0]*stop,start[1]+d[1]*stop)))
             return segments,uses,False
-        _,_,channel = min(hits,key=lambda h:h[:2])
+        distance,kind,_,obstacle = min(hits,key=lambda h:h[:3])
+        if kind==1:
+            gate = obstacle
+            partner = gate_map.get(gate.partner_id)
+            visit = (gate.id,tuple(direction))
+            if partner is None or visit in visited_gates:
+                return segments,uses,True
+            visited_gates.add(visit)
+            segments.append((start,(start[0]+d[0]*distance,start[1]+d[1]*distance)))
+            # The gap between doors is not a flight segment and cannot collide.
+            start = partner.center
+            last = ('gate',partner.id)
+            continue
+        channel = obstacle
         candidates = []
         orientations = [(DIRECTIONS[channel.entry_direction],channel.pixel_path,
                          DIRECTIONS[channel.exit_direction]),
@@ -142,7 +163,7 @@ def route(board,arrow,counts):
         segments.append((start,path[0]))
         segments.extend(zip(path,path[1:]))
         uses.append(channel.id)
-        start,direction,last = path[-1],outgoing,channel.id
+        start,direction,last = path[-1],outgoing,('channel',channel.id)
 
 
 def move(board,arrow,remaining,counts):
@@ -171,10 +192,21 @@ def validate(board):
         raise BoardError('箭头编号或数量无效')
     for a in board.arrows:
         if a.kind!='normal' or a.launch_vectors:
-            raise BoardError('转弯通道组合目前仅支持普通箭头，请人工处理特殊箭头')
+            raise BoardError('转弯通道/传送门组合目前仅支持普通箭头，请人工处理特殊箭头')
         if a.direction not in DIRECTIONS or not a.cells:
             raise BoardError('箭头路径或方向无效')
         geometry.validate_geometry(board,a)
+    gates = {g.id:g for g in board.teleport_gates}
+    if len(gates)!=len(board.teleport_gates):
+        raise BoardError('传送门编号重复')
+    for gate in gates.values():
+        partner = gates.get(gate.partner_id)
+        if partner is None or partner.id==gate.id or partner.partner_id!=gate.id:
+            raise BoardError('传送门配对不确定')
+        x,y,w,h = gate.visual_rect
+        if w<=0 or h<=0 or not (0<=x<=gate.center[0]<=x+w<=board.image_width
+                                and 0<=y<=gate.center[1]<=y+h<=board.image_height):
+            raise BoardError('传送门几何范围无效')
     if len({c.id for c in board.turn_channels})!=len(board.turn_channels):
         raise BoardError('转弯通道编号重复')
     for c in board.turn_channels:
@@ -223,6 +255,10 @@ def solve(board):
             rest = search(remaining-{aid},after)
             if rest is not None:
                 return [(aid,uses,threshold)]+rest
+            if not board.turn_channels:
+                # Permanent gates have a static route: removing another ready
+                # arrow cannot help a deadlocked remainder, so do not permute it.
+                break
         failed.add(key)
         return None
     steps = search(ids,counts)

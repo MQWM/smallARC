@@ -157,7 +157,7 @@ def capture_pair(device, control, *, first_image=None, first_at=None,
 
 def exit_phases(board,arrow,counts):
     from .geometry import launch_segments,rectangle_segments
-    if board.turn_channels:
+    if board.turn_channels or board.teleport_gates:
         from .channels import route
         segments,_,blocked = route(board,arrow,counts)
         if blocked:

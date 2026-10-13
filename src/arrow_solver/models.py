@@ -38,6 +38,14 @@ class Portal:
 
 
 @dataclass
+class TeleportGate:
+    id: int
+    center: tuple[float,float]
+    visual_rect: tuple[int,int,int,int]
+    partner_id: int | None = None
+
+
+@dataclass
 class CounterBlock:
     cell: Cell
     remaining: int
@@ -89,6 +97,7 @@ class Board:
     counter_blocks: list[CounterBlock] = field(default_factory=list)
     turn_channels: list[TurnChannel] = field(default_factory=list)
     orbit_obstacle: OrbitObstacle | None = None
+    teleport_gates: list[TeleportGate] = field(default_factory=list)
 
     def pixel(self, cell: Cell) -> tuple[float, float]:
         return tuple(self.grid_origin[i] + cell[i] * self.grid_step[i] for i in range(2))
@@ -115,6 +124,8 @@ class Board:
                                     "launch_vectors": [tuple(v) for v in a.get("launch_vectors", [])]})
                           for a in data["arrows"]]
         data["portals"] = [Portal(tuple(p["cell"]), tuple(p["center"]), tuple(p["visual_rect"])) for p in data.get("portals", [])]
+        data['teleport_gates'] = [TeleportGate(g['id'],tuple(g['center']),tuple(g['visual_rect']),g.get('partner_id'))
+                                  for g in data.get('teleport_gates',[])]
         data["counter_blocks"] = [CounterBlock(tuple(p["cell"]),p["remaining"],tuple(p["visual_rect"])) for p in data.get("counter_blocks",[])]
         data['turn_channels'] = [TurnChannel(**{**c,'entry':tuple(c['entry']),'exit':tuple(c['exit']),
                                       'pixel_path':[tuple(p) for p in c['pixel_path']],
