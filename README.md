@@ -4,7 +4,7 @@ Mac 桌面辅助窗口与 scrcpy 并排使用。通过一张完整截图识别�
 
 ## 启动
 
-本项目仅在本机使用，默认直接运行源码。除非用户明确要求，不进行打包。`dist/SmallARC.app` 是此前的旧构建，不包含本轮更新。
+本项目仅在本机使用，通过 Python 直接运行源码。
 
 当前仓库已经建立 `.venv` 并安装依赖。双击 `start.command`，或在当前目录执行：
 
@@ -116,7 +116,7 @@ python3 -m venv .venv
 
 ## 输出与命令行
 
-源码运行默认输出到当前目录 `runs/`，每次导出独立目录。打包应用默认输出到 `~/SmallARC-runs/`。可用 `--runs` 指定目录。
+默认输出到当前目录 `runs/`，每次导出独立目录。可用 `--runs` 指定目录。
 
 ```bash
 .venv/bin/python app.py --analyze tests/fixtures/level2.jpg
@@ -141,7 +141,7 @@ python3 -m venv .venv
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
-当前 171 项测试通过。保留 `build.command` 供以后明确需要时使用，本轮未执行打包。
+当前 229 项测试通过。
 
 测试覆盖规则求解、真实图片与缩放、路径编辑、坐标转换、界面状态、设备命令参数和模拟点击发送、停止继续和执行前校验。模拟设备测试不会点击真实手机。实际手机点击、游戏动画时序及跨关卡行为必须在真实设备上验证。
 

@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="小小箭头桌面辅助工具")
     parser.add_argument("--analyze", type=Path, help="离线识别截图并导出，不启动桌面窗口")
     parser.add_argument("--crop", nargs=4, type=int, metavar=("X", "Y", "W", "H"))
-    parser.add_argument("--runs", type=Path, default=Path.home() / "SmallARC-runs" if getattr(sys, "frozen", False) else Path.cwd() / "runs")
+    parser.add_argument("--runs", type=Path, default=Path.cwd() / "runs")
     args = parser.parse_args()
     if args.analyze:
         from .vision import read_image, recognize
