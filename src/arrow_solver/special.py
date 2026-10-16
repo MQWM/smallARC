@@ -453,7 +453,7 @@ def counter_digit_templates():
                 mask=np.zeros((70,65),np.uint8)
                 cv2.putText(mask,str(digit),(8,55),font,1.6,255,thickness,cv2.LINE_AA)
                 templates.append((digit,normalize_digit(mask>100)))
-    # Small outlined game glyphs differ from Hershey fonts, especially 1 and 6.
+    # Small outlined game glyphs differ from Hershey fonts, especially 1, 6, 9.
     samples=json.loads((Path(__file__).parent/'assets/counter_digits.json').read_text())
     for sample in samples['glyphs']:
         mask=np.array([[int(pixel) for pixel in row] for row in sample['rows']],np.uint8)
@@ -479,6 +479,10 @@ def read_white_number(image):
         if score<.48:
             return None
         digits.append(str(digit))
+    # Counter values do not use padded zeroes. A result like "01" can be a
+    # small 9 misread as 0; converting it to 1 would unlock a blocked route.
+    if len(digits)>1 and digits[0]=='0':
+        return None
     return int(''.join(digits))
 
 

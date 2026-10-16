@@ -120,3 +120,56 @@ def test_game_counter_font_keeps_digits_at_different_sizes(scale,rect,expected):
     x,y,w,h=rect
     patch=cv2.resize(image[y:y+h,x:x+w],None,fx=scale,fy=scale)
     assert read_white_number(patch)==expected
+
+
+@pytest.mark.parametrize('scale',[.75,1.,1.25])
+@pytest.mark.parametrize('rect,expected',[((205,809,29,29),91),((514,1688,29,29),37)])
+def test_level423_small_counter_digits_are_not_truncated(scale,rect,expected):
+    from arrow_solver.special import read_white_number
+    image = read_image(Path(__file__).parent/'fixtures/recorded/level423.png')
+    x,y,w,h = rect
+    patch = cv2.resize(image[y:y+h,x:x+w],None,fx=scale,fy=scale)
+    assert read_white_number(patch)==expected
+
+
+def test_misread_leading_zero_is_unknown_not_a_smaller_counter(monkeypatch):
+    from arrow_solver import special
+    image = read_image(Path(__file__).parent/'fixtures/recorded/level423.png')
+    # Without a suitable 9 template this glyph used to become "01" -> 1.
+    templates = [(d,t) for d,t in special.counter_digit_templates() if d!=9]
+    monkeypatch.setattr(special,'counter_digit_templates',lambda:templates)
+    assert special.read_white_number(image[809:838,205:234]) is None
+    board = recognize(image).board
+    assert any(b.remaining is None for b in board.counter_blocks)
+    assert any('数字不确定' in issue for issue in board.issues)
+    with pytest.raises(ValueError):
+        solve(board)
+
+
+@pytest.mark.parametrize('scale',[.75,1.,1.25])
+def test_level423_counter_gates_delay_all_affected_actions(scale,tmp_path):
+    from arrow_solver.executor import ScreenValidator,Executor
+    from arrow_solver.solver import block_threshold,verify_plan
+    from test_next_level import ClockControl
+    image = cv2.resize(read_image(Path(__file__).parent/'fixtures/recorded/level423.png'),None,fx=scale,fy=scale)
+    board = recognize(image).board
+    assert not board.issues and len(board.arrows)==124
+    assert sorted(b.remaining for b in board.counter_blocks)==[37,91]
+    plan = solve(board)
+    verify_plan(board,plan)
+    for arrow in board.arrows:
+        assert plan.order.index(arrow.id)>=block_threshold(board,arrow)
+    affected = [a for a in board.arrows if block_threshold(board,a)==91]
+    assert len(affected)==3
+    if scale==1:
+        assert plan.order.index(9)+1==92
+        assert plan.order.index(27)+1==121
+    ScreenValidator(image,board)
+    clock = ClockControl()
+    taps = []
+    class Device:
+        serial = 'test-only'
+        def tap(self,*point):taps.append(point)
+        def screenshot(self):pytest.fail('counter execution must not capture mid-level')
+    assert Executor(Device(),board,plan,image,tmp_path,clock,delay=0,now=lambda:clock.t).run()==124
+    assert len(taps)==124
